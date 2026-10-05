@@ -1,0 +1,26 @@
+name: Validate
+on: [push, pull_request]
+jobs:
+  synthetic-tests:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python -m venv .venv
+      - run: .venv/bin/pip install -e '.[dev]'
+      - run: npm ci
+      - run: cargo fmt --check --manifest-path importer/Cargo.toml
+      - run: cargo test --locked --manifest-path importer/Cargo.toml
+      - run: cargo build --release --locked --manifest-path importer/Cargo.toml
+      - run: .venv/bin/ruff check gcapp scripts tests
+      - run: .venv/bin/pytest -q
+      - run: npm run build
+      - run: npx playwright install chromium
+      - run: npm test

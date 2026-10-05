@@ -1,0 +1,26 @@
+{
+  "messages": 1000000,
+  "fixture_build_seconds": 71.516,
+  "runtime": "Apple Silicon / Python 3.12 / SQLite FTS5",
+  "queries": {
+    "overview": {
+      "cold_seconds": 0.0986,
+      "warm_seconds": 0.0029
+    },
+    "member_overview": {
+      "cold_seconds": 0.0233,
+      "warm_seconds": 0.0006
+    },
+    "lexical_search": {
+      "cold_seconds": 0.3917,
+      "warm_seconds": 0.178
+    },
+    "word_counts": {
+      "cold_seconds": 0.4163,
+      "warm_seconds": 0.0
+    }
+  },
+  "peak_memory_mb": 38.3,
+  "database_mb": 382.8,
+  "notes": "Direct synthetic fixture insertion; local text inference throughput and cloud latency are not benchmarked. Semantic search is validated separately on the 6,947-message demo."
+}

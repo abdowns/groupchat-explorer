@@ -1,0 +1,95 @@
+# Group Chat Explorer
+
+A local web app for the entire **available** history of one Messages group. Browse the original conversations, explore statistics, trace recurring jokes, search by meaning, and turn real messages into recaps and games. GPL-3.0-only.
+
+## Start on macOS
+
+Install Node.js 22+, Python 3.12, Rust, and Xcode Command Line Tools:
+
+```sh
+xcode-select --install
+brew install node python@3.12 rust ffmpeg
+npm start
+```
+
+Open **http://127.0.0.1:8765**. The launch command creates the Python environment, installs dependencies, compiles the Rust importer, and builds the frontend on first use. Choose **Explore the demo** to load a deterministic fictional group with eight years of messages and generated media cards. No personal database is read unless you choose an import.
+
+Enable local semantic search, topics, image embeddings, and audio transcription by installing the analysis extra once:
+
+```sh
+.venv/bin/pip install -e '.[analysis]'
+```
+
+Then use **Settings & analysis → Build semantic index**, or select the media analysis jobs. First use downloads the selected public model weights; subsequent inference stays local. macOS Vision OCR uses Apple's installed framework. FFmpeg handles optional audio/video previews and Whisper input decoding. `.venv/bin/gcapp doctor` checks installation capabilities.
+
+To install the exact Python versions used during validation instead of resolving the declared ranges, use Python 3.12 and `.venv/bin/pip install -r requirements-lock.txt`, then `.venv/bin/pip install -e . --no-deps`. Node and Rust dependencies have lockfiles. Some Python wheels and model licenses vary by host; see [NOTICE](NOTICE).
+
+## Import your group
+
+1. Choose **Import a chat**, then the local `~/Library/Messages/chat.db` or a supplied snapshot. For a copied database, optionally select the root of its `Attachments` directory.
+2. Discover the available groups and select the thread. Select multiple related threads only when you want to combine their history in this workspace. Participant equality never causes automatic merging.
+3. Import. Progress and diagnostics appear under Settings. Rename members or explicitly merge their phone/email identities in People.
+4. Use **Refresh archive** to reconcile new messages and changed historical edits/reactions. Reimporting the same records is idempotent.
+
+If macOS denies access, grant the terminal running the app (or Codex, if launched here) **Full Disk Access** under System Settings → Privacy & Security, quit/reopen it, and retry. A source database is opened read-only and copied with SQLite's online backup API, including committed WAL state. Apple's database is never altered. The Rust importer uses `imessage-database` to decode structured bodies; it does not scrape HTML.
+
+App-owned workspaces, snapshots, annotations, vector indexes, cached previews, and job state live at `~/Library/Application Support/GroupChatExplorer`, outside this repository. Set `GCAPP_DATA_DIR` to choose another location. API keys are stored in macOS Keychain under `GroupChatExplorer`, indexed by workspace ID. Temporary import snapshots are removed after the import; abandoned discovery snapshots expire after a day when another discovery runs. Back up the data directory to preserve imported history and annotations. Deleting that directory removes the local archive.
+
+## Explore
+
+- **Overview:** totals, participation charts, activity calendar, most-reacted messages, and on-this-day memories.
+- **Timeline:** zoomable activity, suggested eras, bursts, quiet-period revivals, recorded changes, and pinned events. Rename, split, combine, and edit era boundaries.
+- **People:** participation, word counts, active days, streaks, length, activity hours, vocabulary, phrases, emoji, and topic interests. Stable colors follow each identity.
+- **Reactions:** current received reactions, zero-inclusive per-message averages, reacted-message percentage, observed additions given, type breakdowns, giver/recipient matrix, and supporting messages. Minimum sample size defaults to 20.
+- **Words & phrases:** case-insensitive whole-word matching, exact phrases, substring mode, or English Porter variants. Compare occurrences, matching messages, and uses per 1,000 authored words; see first/last observed use and trends. Matching archives paginate beyond previews.
+- **Conversations:** session starters, co-participation network, explicit reply partners/trees, and chronological replay. Inferred sessions default to a 30-minute inactivity gap and remain distinct from explicit replies.
+- **Topics & search:** FTS5 keyword retrieval, MiniLM semantic retrieval, reciprocal-rank hybrid fusion, HDBSCAN topics with class-based TF-IDF labels, trends, and source-linked archive questions.
+- **Lore:** recurring phrase candidates, adoption across members, observed origins, contextual sources, and optional generated narratives. Treat suggested lore as interpretations you can inspect.
+- **Media & links:** attachment gallery, missing-file placeholders, local Vision OCR, existing/Whisper transcripts, repeated-image hashes, CLIP image search, URLs and domains. Shared URLs are never automatically fetched.
+- **Recaps & games:** selected-period statistics, era comparison, computed and editable awards, downloadable PNG recap cards, statistics CSV, who-said-it, finish-the-quote, and guess-the-year. Games reveal the actual archived conversation after each answer.
+
+Date, member, and era filters are shared. Click charts/cards to open evidence with nearby context. Conversations use a virtualized, cursor-paginated list. Light/dark themes, reduced-motion styles, keyboard navigation, and tabular chart alternatives are available. Use ⌘K/Ctrl+K to open search.
+
+## Optional cloud narratives
+
+In Settings, choose your Responses-compatible OpenAI model, save a key, and explicitly enable cloud processing for that workspace. Each generated era/lore/recap/answer shows its proposed scope and approximate input/output token allowance before you submit it. Only selected message excerpts, display names, statistics, and candidate annotations are sent. Model outputs are validated structured JSON with resolvable message IDs, cached by archive revision, and recorded with token usage.
+
+Common numerical questions use approved local SQL aggregates. Other answers use retrieved evidence; insufficient evidence is an explicit result. The provider has no tools, file access, generated SQL execution, or external actions. Text within messages is treated as untrusted data. The cloud adapter has been validated with mock Responses payloads; live provider behavior and account/model availability depend on your configuration.
+
+## Development and validation
+
+```sh
+.venv/bin/pip install -e '.[dev,analysis]'
+GCAPP_DATA_DIR=/tmp/gcapp-dev .venv/bin/python -m gcapp.cli serve
+# In a second terminal:
+npm run dev
+# Regenerate the client contract from the running API:
+npm run types
+
+.venv/bin/pytest -q
+.venv/bin/ruff check gcapp tests scripts
+cargo test --locked --manifest-path importer/Cargo.toml
+npm run build
+npx playwright install chromium
+npm test
+```
+
+Browser tests create/use a synthetic demo. The test servers use `/tmp/gcapp-e2e` when no server already exists; a running development server is reused, so point it at synthetic data. No fixtures contain real chat history or credentials. The Rust integration test constructs Apple's schema and uses a fictional typedstream body fixture.
+
+The million-message fixture benchmark is reproducible with:
+
+```sh
+.venv/bin/python scripts/benchmark.py --report docs/benchmark.json
+```
+
+On the available Apple Silicon Mac, a million messages used a 383 MB SQLite archive; overview took 99 ms cold / 3 ms warm, filtered member overview 23 ms / 1 ms, and keyword search 392 ms / 178 ms. Uncached whole-history word counting took 416 ms, with revision-cached repeats below 1 ms. Peak benchmark process memory was 38 MB. See [the measured report](docs/benchmark.json). This measures indexed text/analytics, not million-message model inference, media throughput, or total frontend/browser memory. Actual semantic paraphrase retrieval is separately validated on the 6,947-message demo: 1.3 seconds for the first search after model loading and 17 ms warm. A cached index rebuild made zero embedding inference calls. Vision OCR, CLIP, and Whisper were also exercised on fictional media; see [model validation](docs/model-validation.json).
+
+See [architecture and API notes](docs/architecture.md) and [contributing](CONTRIBUTING.md).
+
+## Capability boundaries
+
+“Entire history” means the records available in your supplied database. Deleted/absent messages, unavailable reaction history, and undownloaded attachments cannot be recovered. Tapback current state is reconstructed from observed add/remove/change records; complete historical giver activity may not exist in Apple's archive. Retained old messages are not silently deleted when absent from a later source snapshot.
+
+macOS is the initial host. Original Unicode is retained; language models and word variants are English-first. Local era/lore labels are heuristic suggestions, not factual event classifications or diagnoses. Topic clustering is bounded to a reproducible reservoir of up to 20,000 passages, then assigns other passages to learned centroids. Some rich app payloads remain preserved raw rather than fully decoded into dedicated UI widgets. Reply-tree display is capped at 1,000 records; gallery results at 300 per selection. Media analysis records per-file errors so unsupported formats do not disappear.
+
+Jobs persist and retry after restart. Completed embedding batches and media files are cached; cancelled/restarted semantic jobs reconstruct their index from those caches. A cancelled initial import requires discovering the source again because its temporary full database snapshot is removed. Browsing can continue during analysis through SQLite WAL; annotation writes may wait for an active analysis transaction. First inference/model download and a full archive analysis can take much longer than interactive searches. Live cloud calls and a million-message semantic/media run have not been performance-qualified.

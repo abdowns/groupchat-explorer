@@ -1,0 +1,15 @@
+Group Chat Explorer
+Copyright (c) 2026 Group Chat Explorer contributors.
+Licensed under GPL-3.0-only. See LICENSE.
+
+The Rust importer links imessage-database 4.3.0 by Christopher Sardegna
+(https://github.com/ReagentX/imessage-exporter), licensed GPL-3.0-or-later.
+Its dependency notices and licenses remain with their upstream packages.
+
+Local model weights are downloaded separately, never bundled in the repository:
+sentence-transformers/all-MiniLM-L6-v2 — Apache-2.0
+sentence-transformers/clip-ViT-B-32 — see upstream model card and CLIP license
+OpenAI Whisper base.en — MIT
+
+All demo conversations, images, and test fixture text are fictional and were
+created for this project. No personal Messages archive is included.

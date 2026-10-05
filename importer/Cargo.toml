@@ -1,0 +1,10 @@
+[package]
+name = "gc-importer"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+
+[dependencies]
+imessage-database = "=4.3.0"
+rusqlite = { version = "=0.40.2", features = ["bundled", "blob"] }
+serde_json = "1"

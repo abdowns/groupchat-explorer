@@ -1,0 +1,15 @@
+{
+  "fictional_messages": 6947,
+  "indexed_passages": 2397,
+  "topics": 7,
+  "paraphrase": "nearly late for our airplane",
+  "top_result": "we almost missed our flight at the airport",
+  "semantic_search_cold_seconds": 1.302,
+  "semantic_search_warm_seconds": 0.017,
+  "cached_rebuild_seconds": 3.41,
+  "cached_rebuild_model_encode_calls": 0,
+  "vision_ocr_images": 6,
+  "clip_image_embeddings": 6,
+  "whisper_transcript": "We booked the mountain cabin for June, please bring snacks for the road trip.",
+  "cloud_validation": "Mock Responses structured output, invalid citation rejection, untrusted message isolation; no live cloud request"
+}
