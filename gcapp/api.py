@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import analysis, analytics, cloud, contacts, ingestion, jobs, media
+from . import analysis, analytics, cloud, contacts, ingestion, jobs, media, semantic_rankings
 from .store import (
     ROOT,
     create_workspace,
@@ -407,6 +407,42 @@ def word_stats(
         result = analytics.word_explorer(db, filters, q, mode)
         result["messages"] = list_messages(db, filters, 60, ids=result.get("message_ids", []))["items"]
         return result
+
+
+class SemanticTopicInput(BaseModel):
+    q: str = Field(min_length=1, max_length=500)
+    threshold: float = Field(default=0.35, ge=0.1, le=0.95)
+
+
+@app.post("/api/v1/workspaces/{wid}/semantic-words/analyze")
+def analyze_semantic_topic(wid: str, body: SemanticTopicInput):
+    with workspace(wid) as db:
+        return semantic_rankings.enqueue(db, wid, body.q, body.threshold)
+
+
+@app.get("/api/v1/workspaces/{wid}/semantic-words")
+def semantic_word_stats(
+    wid: str,
+    q: str = Query(min_length=1, max_length=500),
+    threshold: float = Query(0.35, ge=0.1, le=0.95),
+    minimum: int = Query(20, ge=1, le=1000000),
+    filters=Depends(filter_params),
+) -> dict[str, Any]:
+    with workspace(wid) as db:
+        return semantic_rankings.ranking(db, wid, filters, q, threshold, minimum)
+
+
+@app.get("/api/v1/workspaces/{wid}/semantic-matches", response_model=MessagePage)
+def semantic_matches(
+    wid: str,
+    q: str = Query(min_length=1, max_length=500),
+    threshold: float = Query(0.35, ge=0.1, le=0.95),
+    limit: int = Query(60, ge=1, le=200),
+    cursor: str | None = None,
+    filters=Depends(filter_params),
+):
+    with workspace(wid) as db:
+        return semantic_rankings.matches(db, wid, filters, q, threshold, limit, cursor)
 
 
 @app.get("/api/v1/workspaces/{wid}/people/{pid}")

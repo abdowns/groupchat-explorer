@@ -118,14 +118,19 @@ CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY,kind TEXT,title TEXT,bo
 CREATE TABLE IF NOT EXISTS passages(id INTEGER PRIMARY KEY,text TEXT,sources TEXT,start REAL,end REAL,topic_id INTEGER,
  version TEXT);
 CREATE TABLE IF NOT EXISTS usage(id INTEGER PRIMARY KEY,created TEXT,model TEXT,input_tokens INTEGER,output_tokens INTEGER,kind TEXT);
-PRAGMA user_version=3;
+CREATE TABLE IF NOT EXISTS semantic_match_queries(id TEXT PRIMARY KEY,query TEXT,threshold REAL,revision INTEGER,
+ job_id TEXT,ready INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS semantic_matches(query_id TEXT REFERENCES semantic_match_queries(id) ON DELETE CASCADE,
+ message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,score REAL,PRIMARY KEY(query_id,message_id));
+CREATE INDEX IF NOT EXISTS semantic_matches_message ON semantic_matches(message_id,query_id);
+PRAGMA user_version=4;
 """
 
 
 @contextlib.contextmanager
 def workspace(wid):
     db = connect(workspace_dir(wid) / "archive.sqlite")
-    if db.execute("PRAGMA user_version").fetchone()[0] < 3:
+    if db.execute("PRAGMA user_version").fetchone()[0] < 4:
         db.executescript(SCHEMA)
         refresh_person_stats(db)
     try:
@@ -552,8 +557,12 @@ def list_messages(
     reply_person=None,
     started_by=None,
     with_person=None,
+    semantic_query=None,
 ):
     where, params = scope(db, **filters)
+    if semantic_query:
+        where += " AND m.id IN (SELECT message_id FROM semantic_matches WHERE query_id=?)"
+        params.append(semantic_query)
     if reply_person:
         where += " AND m.reply_to IN (SELECT id FROM messages WHERE person_id=?)"
         params.append(reply_person)

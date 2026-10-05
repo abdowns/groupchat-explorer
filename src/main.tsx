@@ -145,6 +145,7 @@ type DrawerSpec = {
   thread?: string;
   extra?: Filters;
   word?: { q: string; mode?: string };
+  semantic?: { q: string; threshold: number };
   reaction?: {
     actor?: string;
     recipient?: string;
@@ -558,9 +559,13 @@ function Drawer({ spec, close }: { spec: DrawerSpec; close: () => void }) {
             ? request(
                 `/workspaces/${wid}/reaction-targets?${params({ ...filters, ...spec.extra, ...spec.reaction, cursor: pageParam, limit: 100 })}`,
               )
-            : request(
-                `/workspaces/${wid}/messages?${params({ ...filters, ...spec.extra, word: spec.word?.q, word_mode: spec.word?.mode, ids: spec.ids?.join(","), kind: spec.ids ? "all" : "message", cursor: pageParam, direction: spec.extra?.session ? "asc" : "desc", limit: 100 })}`,
-              ),
+            : spec.semantic
+              ? request(
+                  `/workspaces/${wid}/semantic-matches?${params({ ...filters, ...spec.extra, ...spec.semantic, cursor: pageParam, limit: 100 })}`,
+                )
+              : request(
+                  `/workspaces/${wid}/messages?${params({ ...filters, ...spec.extra, word: spec.word?.q, word_mode: spec.word?.mode, ids: spec.ids?.join(","), kind: spec.ids ? "all" : "message", cursor: pageParam, direction: spec.extra?.session ? "asc" : "desc", limit: 100 })}`,
+                ),
     getNextPageParam: (last: any) => last.next_cursor ?? undefined,
   });
   const rows: Message[] =
@@ -1927,12 +1932,271 @@ function Reactions() {
   );
 }
 
+function SemanticWords({ term }: { term: string }) {
+  const { wid, filters, open, toast, go } = useApp();
+  const [threshold, setThreshold] = useState(0.35);
+  const [minimum, setMinimum] = useState(20);
+  const [metric, setMetric] = useState("per_1000");
+  const [busy, setBusy] = useState(false);
+  const q = useQuery({
+    queryKey: [wid, "semantic-words", filters, term, threshold, minimum],
+    queryFn: () =>
+      request(
+        `/workspaces/${wid}/semantic-words?${params({ ...filters, q: term, threshold, minimum })}`,
+      ),
+    enabled: Boolean(wid && term.trim()),
+    refetchInterval: (query) =>
+      ["queued", "running"].includes(query.state.data?.status) ? 2000 : false,
+  });
+  const evidence = (title: string, extra: Filters = {}) =>
+    open({
+      title,
+      semantic: { q: term, threshold },
+      extra,
+    });
+  async function analyze() {
+    setBusy(true);
+    try {
+      await mutate(`/workspaces/${wid}/semantic-words/analyze`, {
+        q: term,
+        threshold,
+      });
+      await client.invalidateQueries({ queryKey: [wid] });
+      toast("Semantic comparison queued");
+    } catch (e: any) {
+      toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <Panel
+        title="Explore a meaning"
+        subtitle="Local semantic matching of each member’s own messages"
+      >
+        <p className="explain">
+          Try a topic like “girls”, or describe what you mean: “dating, crushes,
+          and romantic relationships”. Matches can use different words. Each
+          message is counted once; other speakers in the conversation get no
+          automatic credit.
+        </p>
+        <div className="form">
+          <label>
+            Similarity cutoff: {threshold.toFixed(2)}
+            <input
+              aria-label="Semantic similarity cutoff"
+              type="range"
+              min="0.1"
+              max="0.95"
+              step="0.05"
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+            />
+          </label>
+          <p className="footnote">
+            Lower includes broader associations; higher keeps closer matches.
+            Cosine similarity is not a confidence percentage.
+          </p>
+          <label>
+            Minimum authored messages per member
+            <input
+              type="number"
+              min={1}
+              max={1000000}
+              value={minimum}
+              onChange={(e) =>
+                setMinimum(
+                  Math.max(1, Math.min(1000000, Number(e.target.value) || 1)),
+                )
+              }
+            />
+          </label>
+        </div>
+      </Panel>
+      {!term.trim() ? (
+        <Empty title="Enter a topic to explore" />
+      ) : (
+        <State query={q}>
+          {(d) =>
+            !d.ready ? (
+              <Panel
+                title={
+                  d.status === "index_required"
+                    ? "Build your message index first"
+                    : `Semantic matches for “${term}”`
+                }
+              >
+                {d.status === "index_required" ? (
+                  <>
+                    <p className="explain">
+                      Build or rebuild the local semantic index in Settings
+                      &amp; analysis. This version indexes short messages
+                      individually too.
+                    </p>
+                    <button className="primary" onClick={() => go("settings")}>
+                      Open Settings &amp; analysis
+                    </button>
+                  </>
+                ) : ["queued", "running"].includes(d.status) ? (
+                  <>
+                    <p role="status">
+                      {d.message || "Waiting to compare every indexed message…"}
+                    </p>
+                    <progress value={d.progress ?? 0} max={1} />
+                    <p className="footnote">
+                      You can keep browsing. Progress and cancellation are
+                      available in Settings &amp; analysis.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="explain">
+                      Compare this meaning against the full archive. Results are
+                      cached locally, so date, member, and era filters can
+                      update without rerunning the model.
+                    </p>
+                    {d.message && <p role="status">{d.message}</p>}
+                    <button
+                      className="primary"
+                      disabled={busy}
+                      onClick={analyze}
+                    >
+                      {busy ? "Queuing…" : "Analyze meaning"}
+                    </button>
+                  </>
+                )}
+              </Panel>
+            ) : (
+              <>
+                <div className="stats-grid">
+                  <MiniStat
+                    title="Semantically matching messages"
+                    value={num(d.matching_messages)}
+                  />
+                  <MiniStat
+                    title="Authored messages in selection"
+                    value={num(d.total_messages)}
+                  />
+                  <MiniStat
+                    title="Matches per 1,000 messages"
+                    value={
+                      d.total_messages
+                        ? (
+                            (d.matching_messages * 1000) /
+                            d.total_messages
+                          ).toFixed(2)
+                        : "—"
+                    }
+                  />
+                  <MiniStat
+                    title="Similarity cutoff"
+                    value={threshold.toFixed(2)}
+                  />
+                </div>
+                <div className="grid-even">
+                  <Panel
+                    title={`Who talks about “${term}” most?`}
+                    subtitle="Model-selected matches, normalized by all authored messages under the same filters."
+                    action={
+                      <select
+                        aria-label="Semantic ranking metric"
+                        value={metric}
+                        onChange={(e) => setMetric(e.target.value)}
+                      >
+                        <option value="per_1000">Per 1,000 messages</option>
+                        <option value="matches">Matching messages</option>
+                      </select>
+                    }
+                  >
+                    <Bar
+                      rows={[...d.people].sort(
+                        (a: any, b: any) => b[metric] - a[metric],
+                      )}
+                      field={metric}
+                      sample="messages"
+                      onClick={(p) =>
+                        evidence(`${p.name} talking about “${term}”`, {
+                          person: p.id,
+                        })
+                      }
+                    />
+                    {!d.people.length && (
+                      <Empty title="No members meet this sample size" />
+                    )}
+                    <p className="footnote">
+                      All authored messages count in the denominator, including
+                      messages without text or a semantic match. Reactions,
+                      system events, OCR, and transcripts are excluded.
+                    </p>
+                  </Panel>
+                  <Panel
+                    title="The topic through time"
+                    subtitle="Matching authored messages by month"
+                  >
+                    <Chart
+                      label="Semantic topic matches over time"
+                      option={{
+                        xAxis: {
+                          type: "category",
+                          data: d.trend.map((r: any) => r.date),
+                        },
+                        yAxis: { type: "value" },
+                        series: [
+                          {
+                            type: "bar",
+                            data: d.trend.map((r: any) => r.count),
+                            itemStyle: { color: "#638b70" },
+                          },
+                        ],
+                      }}
+                      onClick={(p) =>
+                        evidence(`“${term}” in ${p.name}`, {
+                          start: dayStart(p.name + "-01"),
+                          end: monthEnd(p.name),
+                        })
+                      }
+                    />
+                  </Panel>
+                </div>
+                <Panel
+                  title="Check the meaning matches"
+                  subtitle="Similarity can include false positives or miss subtle references. Inspect the original messages to judge the result."
+                  action={
+                    <button
+                      className="subtle"
+                      onClick={() =>
+                        evidence(`All semantic matches for “${term}”`)
+                      }
+                    >
+                      Browse all semantic matches
+                    </button>
+                  }
+                >
+                  <div className="message-grid">
+                    {d.messages.map((m: Message) => (
+                      <MessageCard key={m.id} m={m} />
+                    ))}
+                  </div>
+                  {!d.messages.length && (
+                    <Empty title="No messages meet this cutoff" />
+                  )}
+                </Panel>
+              </>
+            )
+          }
+        </State>
+      )}
+    </>
+  );
+}
+
 function Words() {
   const [draft, setDraft] = useState("lmao");
   const [term, setTerm] = useState("lmao");
   const [mode, setMode] = useState("word");
   const [rank, setRank] = useState("occurrences");
-  const q = useData("words", { q: term, mode });
+  const q = useData("words", { q: term, mode }, mode !== "semantic");
   const { open } = useApp();
   return (
     <>
@@ -1959,6 +2223,7 @@ function Words() {
           <option value="phrase">Exact phrase</option>
           <option value="substring">Substring</option>
           <option value="variants">English variants</option>
+          <option value="semantic">Semantic meaning</option>
         </select>
         <button className="primary">
           Explore
@@ -1980,126 +2245,130 @@ function Words() {
           </button>
         ))}
       </div>
-      <State query={q}>
-        {(d) => (
-          <>
-            <div className="stats-grid">
-              <MiniStat
-                title={`Uses of “${term}”`}
-                value={num(d.occurrences)}
-              />
-              <MiniStat
-                title="Messages containing it"
-                value={num(d.matching_messages)}
-              />
-              <MiniStat title="Earliest observed use" value={date(d.first)} />
-              <MiniStat title="Latest observed use" value={date(d.last)} />
-            </div>
-            <div className="grid-even">
-              <Panel
-                title={`Who owns “${term}”?`}
-                subtitle="Compare total usage or account for how much each person writes."
-                action={
-                  <select
-                    aria-label="Word ranking metric"
-                    value={rank}
-                    onChange={(e) => setRank(e.target.value)}
-                  >
-                    <option value="occurrences">Total uses</option>
-                    <option value="messages">Matching messages</option>
-                    <option value="per_1000">Per 1,000 words</option>
-                  </select>
-                }
-              >
-                <Bar
-                  rows={[...d.people].sort(
-                    (a: any, b: any) => b[rank] - a[rank],
-                  )}
-                  field={rank}
-                  sample={rank === "per_1000" ? "total_words" : undefined}
-                  onClick={(p) =>
-                    open({
-                      title: `${p.name} saying “${term}”`,
-                      word: { q: term, mode },
-                      extra: { person: p.id },
-                    })
-                  }
+      {mode === "semantic" ? (
+        <SemanticWords term={term} />
+      ) : (
+        <State query={q}>
+          {(d) => (
+            <>
+              <div className="stats-grid">
+                <MiniStat
+                  title={`Uses of “${term}”`}
+                  value={num(d.occurrences)}
                 />
-                {!d.people.length && (
-                  <Empty title="No matches in this selection" />
-                )}
-              </Panel>
-              <Panel
-                title="A phrase through time"
-                subtitle="Monthly occurrences in authored messages"
-              >
-                <Chart
-                  label="Word usage over time"
-                  option={{
-                    xAxis: {
-                      type: "category",
-                      data: d.trend.map((r: any) => r.date),
-                    },
-                    yAxis: { type: "value" },
-                    series: [
-                      {
-                        type: "bar",
-                        data: d.trend.map((r: any) => r.count),
-                        itemStyle: {
-                          color: "#638b70",
-                          borderRadius: [4, 4, 0, 0],
-                        },
-                      },
-                    ],
-                  }}
-                  onClick={(p) =>
-                    open({
-                      title: `“${term}” in ${p.name}`,
-                      word: { q: term, mode },
-                      extra: {
-                        start: dayStart(p.name + "-01"),
-                        end: monthEnd(p.name),
-                      },
-                    })
-                  }
+                <MiniStat
+                  title="Messages containing it"
+                  value={num(d.matching_messages)}
                 />
-              </Panel>
-            </div>
-            {Object.keys(d.variants ?? {}).length > 0 && (
-              <div className="chips">
-                {Object.entries(d.variants).map(([w, n]) => (
-                  <span key={w}>
-                    {w} · {n as number}
-                  </span>
-                ))}
+                <MiniStat title="Earliest observed use" value={date(d.first)} />
+                <MiniStat title="Latest observed use" value={date(d.last)} />
               </div>
-            )}
-            <Panel
-              title="The receipts"
-              subtitle="Click a message for the full exchange"
-              action={
-                <button
-                  className="subtle"
-                  onClick={() =>
-                    open({
-                      title: `All matches for “${term}”`,
-                      word: { q: term, mode },
-                    })
+              <div className="grid-even">
+                <Panel
+                  title={`Who owns “${term}”?`}
+                  subtitle="Compare total usage or account for how much each person writes."
+                  action={
+                    <select
+                      aria-label="Word ranking metric"
+                      value={rank}
+                      onChange={(e) => setRank(e.target.value)}
+                    >
+                      <option value="occurrences">Total uses</option>
+                      <option value="messages">Matching messages</option>
+                      <option value="per_1000">Per 1,000 words</option>
+                    </select>
                   }
                 >
-                  Browse all matches
-                </button>
-              }
-            >
-              <div className="message-grid">
-                {d.messages.slice(0, 12).map((m: Message) => (
-                  <MessageCard key={m.id} m={m} />
-                ))}
+                  <Bar
+                    rows={[...d.people].sort(
+                      (a: any, b: any) => b[rank] - a[rank],
+                    )}
+                    field={rank}
+                    sample={rank === "per_1000" ? "total_words" : undefined}
+                    onClick={(p) =>
+                      open({
+                        title: `${p.name} saying “${term}”`,
+                        word: { q: term, mode },
+                        extra: { person: p.id },
+                      })
+                    }
+                  />
+                  {!d.people.length && (
+                    <Empty title="No matches in this selection" />
+                  )}
+                </Panel>
+                <Panel
+                  title="A phrase through time"
+                  subtitle="Monthly occurrences in authored messages"
+                >
+                  <Chart
+                    label="Word usage over time"
+                    option={{
+                      xAxis: {
+                        type: "category",
+                        data: d.trend.map((r: any) => r.date),
+                      },
+                      yAxis: { type: "value" },
+                      series: [
+                        {
+                          type: "bar",
+                          data: d.trend.map((r: any) => r.count),
+                          itemStyle: {
+                            color: "#638b70",
+                            borderRadius: [4, 4, 0, 0],
+                          },
+                        },
+                      ],
+                    }}
+                    onClick={(p) =>
+                      open({
+                        title: `“${term}” in ${p.name}`,
+                        word: { q: term, mode },
+                        extra: {
+                          start: dayStart(p.name + "-01"),
+                          end: monthEnd(p.name),
+                        },
+                      })
+                    }
+                  />
+                </Panel>
               </div>
-            </Panel>
-          </>
-        )}
-      </State>
+              {Object.keys(d.variants ?? {}).length > 0 && (
+                <div className="chips">
+                  {Object.entries(d.variants).map(([w, n]) => (
+                    <span key={w}>
+                      {w} · {n as number}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <Panel
+                title="The receipts"
+                subtitle="Click a message for the full exchange"
+                action={
+                  <button
+                    className="subtle"
+                    onClick={() =>
+                      open({
+                        title: `All matches for “${term}”`,
+                        word: { q: term, mode },
+                      })
+                    }
+                  >
+                    Browse all matches
+                  </button>
+                }
+              >
+                <div className="message-grid">
+                  {d.messages.slice(0, 12).map((m: Message) => (
+                    <MessageCard key={m.id} m={m} />
+                  ))}
+                </div>
+              </Panel>
+            </>
+          )}
+        </State>
+      )}
     </>
   );
 }

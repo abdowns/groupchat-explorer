@@ -276,7 +276,7 @@ def build_semantics(wid, progress):
             labels.clear()
             passage_ids.clear()
 
-        def add(text, sources, start, end):
+        def add(text, sources, start, end, individual=False):
             tokens = model.tokenizer.encode(text, add_special_tokens=False)
             for offset in range(0, len(tokens), 180):
                 chunk = model.tokenizer.decode(tokens[max(0, offset - 30) : offset + 180])
@@ -284,7 +284,13 @@ def build_semantics(wid, progress):
                     continue
                 row = db.execute(
                     "INSERT INTO passages(text,sources,start,end,version) VALUES(?,?,?,?,?)",
-                    (chunk, json.dumps(sources), start, end, f"minilm-v1-r{revision}"),
+                    (
+                        chunk,
+                        json.dumps(sources),
+                        start,
+                        end,
+                        f"minilm-message-v2-r{revision}" if individual else f"minilm-v1-r{revision}",
+                    ),
                 )
                 batch.append(chunk)
                 labels.append(row.lastrowid)
@@ -301,8 +307,8 @@ def build_semantics(wid, progress):
                     add("\n".join(buffer), ids, start, end)
                 buffer, ids, start = [], [], r["ts"]
                 session = r["session_id"]
-            if len(words(r["text"])) >= 5:
-                add(persons[r["person_id"]] + ": " + r["text"], [r["id"]], r["ts"], r["ts"])
+            if r["text"].strip():
+                add(r["text"], [r["id"]], r["ts"], r["ts"], individual=True)
             buffer.append(persons[r["person_id"]] + ": " + r["text"])
             ids.append(r["id"])
             end = r["ts"]
@@ -389,6 +395,8 @@ def build_semantics(wid, progress):
         temp = directory / "semantic.pending.hnsw"
         index.save_index(str(temp))
         os.replace(temp, directory / "semantic.hnsw")
+        db.execute("DELETE FROM semantic_match_queries")
+        set_meta(db, "semantic_message_version", 2)
         set_meta(db, "semantic_revision", revision)
         set_meta(db, "semantic_passages", counter)
         derive_local(db)

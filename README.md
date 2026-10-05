@@ -43,7 +43,7 @@ App-owned workspaces, snapshots, annotations, vector indexes, cached previews, a
 - **Timeline:** zoomable activity, suggested eras, bursts, quiet-period revivals, recorded changes, and pinned events. Rename, split, combine, and edit era boundaries.
 - **People:** participation, word counts, active days, streaks, length, activity hours, vocabulary, phrases, emoji, and topic interests. Stable colors follow each identity.
 - **Reactions:** current received reactions, zero-inclusive per-message averages, reacted-message percentage, observed additions given, type breakdowns, giver/recipient matrix, and supporting messages. Minimum sample size defaults to 20.
-- **Words & phrases:** case-insensitive whole-word matching, exact phrases, substring mode, or English Porter variants. Compare occurrences, matching messages, and uses per 1,000 authored words; see first/last observed use and trends. Matching archives paginate beyond previews.
+- **Words & phrases:** case-insensitive whole-word matching, exact phrases, substring mode, or English Porter variants. Compare occurrences, matching messages, and uses per 1,000 authored words; see first/last observed use and trends. Matching archives paginate beyond previews. Choose **Semantic meaning** to rank who talks about a concept using MiniLM similarity, by matching messages or matches per 1,000 authored messages. Adjust the cutoff and minimum sample size, inspect matching conversations, and compare monthly trends.
 - **Conversations:** session starters, co-participation network, explicit reply partners/trees, and chronological replay. Inferred sessions default to a 30-minute inactivity gap and remain distinct from explicit replies.
 - **Topics & search:** FTS5 keyword retrieval, MiniLM semantic retrieval, reciprocal-rank hybrid fusion, HDBSCAN topics with class-based TF-IDF labels, trends, and source-linked archive questions.
 - **Lore:** recurring phrase candidates, adoption across members, observed origins, contextual sources, and optional generated narratives. Treat suggested lore as interpretations you can inspect.
@@ -51,6 +51,16 @@ App-owned workspaces, snapshots, annotations, vector indexes, cached previews, a
 - **Recaps & games:** selected-period statistics, era comparison, computed and editable awards, downloadable PNG recap cards, statistics CSV, who-said-it, finish-the-quote, and guess-the-year. Games reveal the actual archived conversation after each answer.
 
 Date, member, and era filters are shared. Click charts/cards to open evidence with nearby context. Conversations use a virtualized, cursor-paginated list. Light/dark themes, reduced-motion styles, keyboard navigation, and tabular chart alternatives are available. Use ⌘K/Ctrl+K to open search.
+
+## Semantic topic rankings
+
+1. Build (or rebuild) the local semantic index under **Settings & analysis**. Ranking requires the newer index that embeds every nonempty authored message individually, including short messages; conversation passages remain available for ordinary semantic search.
+2. In **Words & phrases**, choose **Semantic meaning**, enter a topic such as `girls` or a more specific description like `dating, crushes, and romantic relationships`, and click **Explore**, then **Analyze meaning**.
+3. Compare **Per 1,000 messages** or **Matching messages**. The default minimum is 20 authored messages per member, adjustable down to one. Date/member/era filters apply equally to matches and denominators; matching counts in the summary include members below the leaderboard's sample threshold.
+
+A background job compares the query against every individual-message embedding, not just the nearest search hits. Long-message chunks count once using their highest similarity; surrounding speakers get no inferred credit. All ordinary messages, including attachment-only messages, count in the denominator. Reactions, system events, OCR, and transcripts do not. Empty filtered selections display no rate. Cosine similarity is an approximate relevance measure, not a probability or a guaranteed topic classification; inspect the matches and adjust the default 0.35 cutoff to suit your topic.
+
+Results are cached per query, cutoff, and archive revision in the workspace. Changing shared filters or minimum sample size reuses the cache; changing the topic or cutoff requires a new comparison. Jobs support progress, cancellation, retry, and restart recovery in Settings. An archive refresh invalidates the index and cached rankings until the index is rebuilt. This works locally without cloud credentials.
 
 ## Optional cloud narratives
 

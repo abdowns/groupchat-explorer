@@ -208,6 +208,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{wid}/semantic-words/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Analyze Semantic Topic */
+        post: operations["analyze_semantic_topic_api_v1_workspaces__wid__semantic_words_analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{wid}/semantic-words": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Semantic Word Stats */
+        get: operations["semantic_word_stats_api_v1_workspaces__wid__semantic_words_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{wid}/semantic-matches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Semantic Matches */
+        get: operations["semantic_matches_api_v1_workspaces__wid__semantic_matches_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{wid}/people/{pid}": {
         parameters: {
             query?: never;
@@ -868,6 +919,16 @@ export interface components {
              */
             aliases: string;
         };
+        /** SemanticTopicInput */
+        SemanticTopicInput: {
+            /** Q */
+            q: string;
+            /**
+             * Threshold
+             * @default 0.35
+             */
+            threshold: number;
+        };
         /** SettingsInput */
         SettingsInput: {
             /** Timezone */
@@ -1306,6 +1367,126 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_semantic_topic_api_v1_workspaces__wid__semantic_words_analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                wid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SemanticTopicInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    semantic_word_stats_api_v1_workspaces__wid__semantic_words_get: {
+        parameters: {
+            query: {
+                q: string;
+                threshold?: number;
+                minimum?: number;
+                start?: number | null;
+                end?: number | null;
+                person?: string | null;
+                era?: string | null;
+                topic?: number | null;
+                session?: string | null;
+            };
+            header?: never;
+            path: {
+                wid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    semantic_matches_api_v1_workspaces__wid__semantic_matches_get: {
+        parameters: {
+            query: {
+                q: string;
+                threshold?: number;
+                limit?: number;
+                cursor?: string | null;
+                start?: number | null;
+                end?: number | null;
+                person?: string | null;
+                era?: string | null;
+                topic?: number | null;
+                session?: string | null;
+            };
+            header?: never;
+            path: {
+                wid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessagePage"];
                 };
             };
             /** @description Validation Error */

@@ -9,8 +9,8 @@ class Cancelled(Exception):
     pass
 
 
-def enqueue(wid, kind, payload=None):
-    jid = uuid.uuid4().hex
+def enqueue(wid, kind, payload=None, jid=None):
+    jid = jid or uuid.uuid4().hex
     with registry() as db:
         db.execute(
             "INSERT INTO jobs(id,workspace,kind,payload,status,created,updated) VALUES(?,?,?,?,?,?,?)",
@@ -53,6 +53,10 @@ def execute(row):
         refresh(wid, lambda n: progress(min(0.85, n / (n + 10000)), f"Reconciling {n:,} records"))
     elif row["kind"] == "semantic":
         build_semantics(wid, progress)
+    elif row["kind"] == "semantic-ranking":
+        from .semantic_rankings import compute_matches
+
+        compute_matches(wid, payload, progress)
     elif row["kind"] == "local":
         with workspace(wid) as db:
             derive_local(db, progress)
