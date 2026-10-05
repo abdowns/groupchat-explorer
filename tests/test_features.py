@@ -1,4 +1,6 @@
+import base64
 import json
+import plistlib
 import threading
 import time
 
@@ -297,3 +299,115 @@ def test_refresh_detects_newly_downloaded_attachment_without_message_duplication
         assert db.execute("SELECT exists_local FROM attachments WHERE id='later-file'").fetchone()[0] == 1
         assert db.execute("SELECT count(*) FROM messages WHERE id='download'").fetchone()[0] == 1
         assert store.import_records(db, [record]) == 0
+
+
+def test_truncated_rich_metadata_is_diagnostic_and_does_not_abort_import(archive):
+    wid, _ = archive
+    xml = "\n".join(
+        [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+            '<plist version="1.0">',
+            "<dict>",
+            "<key>$archiver</key>",
+            "<string>NSKeyedArchiver</string>",
+            "<key>$objects</key>",
+            "<array>",
+            "<string>$null</string>",
+            "<dict>",
+            "<key>NS.ref</key>",
+        ]
+    )
+    bad = {
+        "schema_version": 1,
+        "record": "message",
+        "id": "bad-preview",
+        "chat_id": "chat",
+        "person": "a",
+        "ts": 1704247000,
+        "text": "Café 👋 https://example.invalid/body",
+        "parts": [{"index": 0, "kind": "run"}],
+        "edits": [{"part": 0, "history": [{"text": "Original body"}]}],
+        "attachments": [{"id": "bad-preview-file", "path": "/missing/fixture.png", "mime": "image/png"}],
+        "payload_xml": xml,
+    }
+    good = {
+        **bad,
+        "id": "after-preview",
+        "ts": 1704247100,
+        "text": "The next message survives",
+        "payload_xml": None,
+        "attachments": [],
+    }
+    with store.workspace(wid) as db:
+        assert store.import_records(db, [bad, good]) == 2
+        coverage = store.meta(db, "coverage")
+        assert coverage["parse_failures"] == 1
+        assert coverage["diagnostics"][0]["id"] == "bad-preview"
+        assert coverage["diagnostics"][0]["phase"] == "rich message metadata"
+        assert coverage["diagnostics"][0]["error"] == "no element found: line 11, column 17"
+        result = store.list_messages(db, {}, ids=["bad-preview"])["items"][0]
+        assert (
+            result["text"] == bad["text"]
+            and result["parts"] == bad["parts"]
+            and result["edits"] == bad["edits"]
+        )
+        assert result["source_metadata"]["payload_xml"] == xml
+        assert result["attachments"][0]["exists_local"] == 0
+        assert (
+            db.execute("SELECT url FROM links WHERE message_id='bad-preview'").fetchone()[0]
+            == "https://example.invalid/body"
+        )
+        assert db.execute("SELECT text FROM messages WHERE id='after-preview'").fetchone()[0] == good["text"]
+        assert store.import_records(db, [bad, good]) == 0
+        assert store.meta(db, "coverage")["parse_failures"] == 1
+
+
+def test_binary_keyed_archive_metadata_preserves_uids_and_links(archive):
+    wid, _ = archive
+    payload = plistlib.dumps(
+        {"$objects": ["https://example.invalid/fixture"], "$top": {"root": plistlib.UID(1)}},
+        fmt=plistlib.FMT_BINARY,
+    )
+    encoded = base64.b64encode(payload).decode()
+    record = {
+        "schema_version": 1,
+        "record": "message",
+        "id": "binary-preview",
+        "chat_id": "chat",
+        "person": "b",
+        "ts": 1704247200,
+        "text": "Plain body",
+        "payload_binary_b64": encoded,
+    }
+    with store.workspace(wid) as db:
+        assert store.import_records(db, [record]) == 1
+        assert store.meta(db, "coverage")["parse_failures"] == 0
+        result = store.list_messages(db, {}, ids=["binary-preview"])["items"][0]
+        assert result["source_metadata"]["payload_binary_b64"] == encoded
+        assert result["words"] == 2
+        assert (
+            db.execute("SELECT url FROM links WHERE message_id='binary-preview'").fetchone()[0]
+            == "https://example.invalid/fixture"
+        )
+        assert store.import_records(db, [record]) == 0
+
+
+def test_invalid_binary_preview_is_nonfatal(archive):
+    wid, _ = archive
+    record = {
+        "schema_version": 1,
+        "record": "message",
+        "id": "invalid-binary",
+        "chat_id": "chat",
+        "person": "b",
+        "ts": 1704247200,
+        "text": "The text still survives",
+        "payload_binary_b64": "not-base64",
+    }
+    with store.workspace(wid) as db:
+        assert store.import_records(db, [record]) == 1
+        assert store.meta(db, "coverage")["parse_failures"] == 1
+        assert (
+            db.execute("SELECT text FROM messages WHERE id='invalid-binary'").fetchone()[0] == record["text"]
+        )

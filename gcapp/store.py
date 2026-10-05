@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import contextlib
 import hashlib
 import json
@@ -10,6 +11,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from xml.parsers.expat import ExpatError
 from zoneinfo import ZoneInfo
 
 ROOT = Path(os.environ.get("GCAPP_DATA_DIR", "~/Library/Application Support/GroupChatExplorer")).expanduser()
@@ -180,6 +182,63 @@ def attachment_path(attachment, root):
     return path
 
 
+def rich_payload_links(record):
+    """Optional preview metadata must never prevent retaining an authored message."""
+    xml = record.get("payload_xml")
+    binary = record.get("payload_binary_b64")
+    if not xml and not binary:
+        return set(), {}, None
+    try:
+
+        def strings(value):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, dict):
+                for child in value.values():
+                    yield from strings(child)
+            elif isinstance(value, list):
+                for child in value:
+                    yield from strings(child)
+            elif isinstance(value, bytes) and value.startswith(b"bplist"):
+                yield from strings(plistlib.loads(value))
+
+        data = base64.b64decode(binary, validate=True) if binary else xml.encode()
+        decoded = plistlib.loads(data)
+        urls = {
+            value
+            for value in strings(decoded)
+            if value.startswith(("https://", "http://")) and not any(c.isspace() for c in value)
+        }
+        return (
+            urls,
+            {
+                "source": "stored Messages payload",
+                "subject": record.get("subject") or "",
+                "variant": record.get("variant") or "",
+            },
+            None,
+        )
+    except (
+        ExpatError,
+        ValueError,
+        TypeError,
+        OverflowError,
+        RecursionError,
+        plistlib.InvalidFileException,
+    ) as error:
+        return (
+            set(),
+            {},
+            {
+                "schema_version": 1,
+                "record": "diagnostic",
+                "id": record["id"],
+                "phase": "rich message metadata",
+                "error": str(error),
+            },
+        )
+
+
 def import_records(db, records, attachment_root=None, progress=None, full_snapshot=False):
     """Reconcile by original GUID. Reactions are events, never authored messages."""
     changed = 0
@@ -218,6 +277,11 @@ def import_records(db, records, attachment_root=None, progress=None, full_snapsh
         db.execute("INSERT OR IGNORE INTO message_threads VALUES(?,?)", (r["id"], str(r["chat_id"])))
         text = r.get("text") or ""
         raw = json.dumps(r, sort_keys=True)
+        payload_urls, preview, payload_error = rich_payload_links(r)
+        if payload_error:
+            failure_count += 1
+            if len(failures) < 100:
+                failures.append(payload_error)
         old = db.execute("SELECT raw FROM messages WHERE id=?", (r["id"],)).fetchone()
         if old and old[0] == raw:
             for attachment in r.get("attachments", []):
@@ -257,34 +321,7 @@ def import_records(db, records, attachment_root=None, progress=None, full_snapsh
         )
         db.execute("DELETE FROM links WHERE message_id=?", (r["id"],))
         urls = set(re.findall(r"https?://[^\s<>]+", text))
-        payload = r.get("payload_xml")
-        preview = {}
-        if payload:
-            try:
-
-                def strings(value):
-                    if isinstance(value, str):
-                        yield value
-                    elif isinstance(value, dict):
-                        for child in value.values():
-                            yield from strings(child)
-                    elif isinstance(value, list):
-                        for child in value:
-                            yield from strings(child)
-                    elif isinstance(value, bytes) and value.startswith(b"bplist"):
-                        yield from strings(plistlib.loads(value))
-
-                decoded = plistlib.loads(payload.encode())
-                for value in strings(decoded):
-                    if value.startswith(("https://", "http://")) and not any(c.isspace() for c in value):
-                        urls.add(value)
-                preview = {
-                    "source": "stored Messages payload",
-                    "subject": r.get("subject") or "",
-                    "variant": r.get("variant") or "",
-                }
-            except (ValueError, TypeError, OverflowError, plistlib.InvalidFileException):
-                pass
+        urls.update(payload_urls)
         for url in sorted(urls):
             from urllib.parse import urlparse
 
@@ -471,6 +508,7 @@ def message(db, row):
             "date_read",
             "date_delivered",
             "payload_xml",
+            "payload_binary_b64",
             "reply_part",
         )
         if raw.get(key) is not None

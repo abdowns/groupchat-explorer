@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use imessage_database::{
     message_types::variants::{Tapback, TapbackAction, Variant},
     tables::{
@@ -24,6 +25,20 @@ fn timestamp(value: i64) -> f64 {
         value as f64
     }) + 978307200.0
 }
+// Keyed archives can contain UIDs, which plist XML cannot represent. Never
+// emit the partially written XML buffer if serialization fails.
+fn encode_payload(
+    payload: &plist::Value,
+) -> Result<(Option<String>, Option<String>), plist::Error> {
+    let mut xml = Vec::new();
+    if payload.to_writer_xml(&mut xml).is_ok() {
+        return Ok((Some(String::from_utf8_lossy(&xml).into_owned()), None));
+    }
+    let mut binary = Vec::new();
+    payload.to_writer_binary(&mut binary)?;
+    Ok((None, Some(STANDARD.encode(binary))))
+}
+
 fn emit(out: &mut impl Write, value: Value) -> io::Result<()> {
     serde_json::to_writer(&mut *out, &value)?;
     out.write_all(b"\n")
@@ -161,18 +176,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .collect();
         let attachments:Vec<Value>=Attachment::from_message(&db,&m,&caps)?.into_iter().map(|a|json!({"id":a.guid.clone().unwrap_or_else(||format!("attachment-{}",a.rowid)),
             "path":a.filename,"name":a.transfer_name,"mime":a.mime_type,"bytes":a.total_bytes,"sticker":a.is_sticker,"transcript":a.guid.as_ref().and_then(|guid|transcripts.get(guid))})).collect();
-        let payload = m.payload_data(&db).map(|p| {
-            let mut xml = Vec::new();
-            p.to_writer_xml(&mut xml).ok();
-            String::from_utf8_lossy(&xml).to_string()
-        });
+        let (payload_xml, payload_binary_b64) = match m.payload_data(&db) {
+            Some(payload) => match encode_payload(&payload) {
+                Ok(encoded) => encoded,
+                Err(error) => {
+                    emit(
+                        &mut out,
+                        json!({"schema_version":1,"record":"diagnostic",
+                        "id":m.guid,"phase":"rich message metadata","error":error.to_string()}),
+                    )?;
+                    (None, None)
+                }
+            },
+            None => (None, None),
+        };
         emit(
             &mut out,
             json!({"schema_version":1,"record":"message","id":m.guid,"source_id":m.rowid,"chat_id":m.chat_id,
             "person":person,"person_name":if person=="me" {Some("You")} else {None},"ts":timestamp(m.date),"text":text,"kind":kind,
             "reply_to":m.thread_originator_guid,"reply_part":m.thread_originator_part,"parts":parts,"edits":edits,"attachments":attachments,
             "announcement":announcement,"variant":format!("{:?}",m.variant()),"service":m.service,"subject":m.subject,
-            "date_read":m.date_read,"date_delivered":m.date_delivered,"effect":m.expressive_send_style_id,"payload_xml":payload}),
+            "date_read":m.date_read,"date_delivered":m.date_delivered,"effect":m.expressive_send_style_id,"payload_xml":payload_xml,"payload_binary_b64":payload_binary_b64}),
         )?;
     }
     out.flush()?;
@@ -188,6 +212,31 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn keyed_archive_uids_round_trip_without_partial_xml() {
+        let mut values = plist::Dictionary::new();
+        values.insert("root".into(), plist::Value::Uid(plist::Uid::new(1)));
+        values.insert(
+            "url".into(),
+            plist::Value::String("https://example.invalid/fixture".into()),
+        );
+        let original = plist::Value::Dictionary(values);
+        let (xml, binary) = encode_payload(&original).unwrap();
+        assert!(xml.is_none());
+        let bytes = STANDARD.decode(binary.unwrap()).unwrap();
+        let restored = plist::Value::from_reader(std::io::Cursor::new(bytes)).unwrap();
+        assert_eq!(original, restored);
+    }
+
+    #[test]
+    fn ordinary_payload_xml_is_complete() {
+        let original = plist::Value::String("Fictional metadata".into());
+        let (xml, binary) = encode_payload(&original).unwrap();
+        assert!(binary.is_none());
+        let restored = plist::Value::from_reader_xml(xml.unwrap().as_bytes()).unwrap();
+        assert_eq!(original, restored);
+    }
+
     #[test]
     fn supports_old_and_new_apple_epochs() {
         assert_eq!(timestamp(600000000), 1578307200.0);

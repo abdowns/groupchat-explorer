@@ -8,3 +8,6 @@ license = "GPL-3.0-only"
 imessage-database = "=4.3.0"
 rusqlite = { version = "=0.40.2", features = ["bundled", "blob"] }
 serde_json = "1"
+
+base64 = "=0.22.1"
+plist = "=1.10.0"

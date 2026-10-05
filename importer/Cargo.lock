@@ -211,7 +211,9 @@ dependencies = [
 name = "gc-importer"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "imessage-database",
+ "plist",
  "rusqlite",
  "serde_json",
 ]

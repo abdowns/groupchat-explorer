@@ -1,4 +1,6 @@
+import base64
 import json
+import plistlib
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -201,6 +203,10 @@ def test_rust_importer_on_synthetic_apple_schema(tmp_path, monkeypatch):
         "INSERT INTO message(guid,text,date,is_from_me,handle_id,item_type,group_action_type,is_read,share_status) VALUES(?,?,600000000000000000,1,0,0,0,0,0)",
         (guid, "Hi 👋 café"),
     )
+    payload = plistlib.dumps(
+        {"root": plistlib.UID(1), "url": "https://example.invalid/fixture"}, fmt=plistlib.FMT_BINARY
+    )
+    db.execute("UPDATE message SET payload_data=? WHERE ROWID=1", (payload,))
     db.execute("INSERT INTO chat_message_join VALUES(1,1)")
     fixture = Path(__file__).parent / "fixtures/attributed-body.bin"
     db.execute(
@@ -228,6 +234,9 @@ def test_rust_importer_on_synthetic_apple_schema(tmp_path, monkeypatch):
     assert records[0]["text"] == "Hi 👋 café"
     assert records[0]["person"] == "me"
     assert records[0]["ts"] == 1578307200
+    assert records[0]["payload_xml"] is None
+    decoded = plistlib.loads(base64.b64decode(records[0]["payload_binary_b64"]))
+    assert decoded["root"] == plistlib.UID(1) and decoded["url"] == "https://example.invalid/fixture"
     assert records[1]["text"] == "Café 👋 — an entirely fictional message."
     assert records[1]["parts"][0]["kind"] == "run"
 
@@ -244,5 +253,9 @@ def test_rust_importer_on_synthetic_apple_schema(tmp_path, monkeypatch):
     with store.workspace(wid) as db:
         assert db.execute("SELECT count(*) FROM messages WHERE kind='message'").fetchone()[0] == 2
         assert db.execute("SELECT 1 FROM messages WHERE id='unselected'").fetchone() is None
+        assert (
+            db.execute("SELECT url FROM links WHERE message_id=?", (guid,)).fetchone()[0]
+            == "https://example.invalid/fixture"
+        )
         assert db.execute("SELECT reaction_count FROM messages WHERE id=?", (guid,)).fetchone()[0] == 1
     assert ingestion.refresh(wid) == 0
