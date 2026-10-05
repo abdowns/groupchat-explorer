@@ -259,3 +259,42 @@ def test_rust_importer_on_synthetic_apple_schema(tmp_path, monkeypatch):
         )
         assert db.execute("SELECT reaction_count FROM messages WHERE id=?", (guid,)).fetchone()[0] == 1
     assert ingestion.refresh(wid) == 0
+
+    # Simulate a group split in April: same name, new thread, continuous history.
+    with sqlite3.connect(path) as source:
+        source.execute("UPDATE chat SET display_name='Neighbors v3' WHERE ROWID=1")
+        source.execute(
+            "INSERT INTO chat(ROWID,display_name,chat_identifier) VALUES(3,'Neighbors v3','split-thread')"
+        )
+        source.executemany("INSERT INTO chat_handle_join VALUES(3,?)", [(1,), (2,)])
+        source.execute(
+            "INSERT INTO message(guid,text,date,is_from_me,handle_id) VALUES('after-split','New thread, same neighbors',800000000000000000,0,2)"
+        )
+        source.execute("INSERT INTO chat_message_join VALUES(3,5)")
+        # Overlapping membership must not double-count or churn on refresh.
+        source.execute("INSERT INTO chat_message_join VALUES(3,1)")
+        source.execute("INSERT INTO chat_message_join VALUES(3,3)")
+    iid = ingestion.snapshot(str(path))
+    chats = ingestion.discover(iid)
+    neighbors = [chat for chat in chats if chat["name"] == "Neighbors v3"]
+    assert {chat["id"] for chat in neighbors} == {1, 3}
+    assert neighbors[0]["end"] < neighbors[1]["end"]
+    combined = store.create_workspace("Neighbors v3 combined")
+    assert ingestion.perform_import(combined, iid, [1, 3]) > 0
+    with store.workspace(combined) as db:
+        assert db.execute("SELECT count(*) FROM messages WHERE kind='message'").fetchone()[0] == 3
+        assert db.execute("SELECT 1 FROM messages WHERE id='unselected'").fetchone() is None
+        assert db.execute("SELECT count(*) FROM reaction_events").fetchone()[0] == 1
+        assert db.execute("SELECT reaction_count FROM messages WHERE id=?", (guid,)).fetchone()[0] == 1
+        assert {
+            row[0] for row in db.execute("SELECT chat_id FROM message_threads WHERE message_id=?", (guid,))
+        } == {"1", "3"}
+        assert store.meta(db, "source")["chat_ids"] == [1, 3]
+        store.set_meta(db, "user_note", "Preserve my annotations")
+    assert ingestion.refresh(combined) == 0
+    with store.workspace(combined) as db:
+        assert store.meta(db, "user_note") == "Preserve my annotations"
+        ordered = [
+            row[0] for row in db.execute("SELECT id FROM messages WHERE kind='message' ORDER BY ts,id")
+        ]
+        assert ordered[-1] == "after-split"

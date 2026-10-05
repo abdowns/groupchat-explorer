@@ -49,7 +49,7 @@ fn handles(db: &Connection) -> rusqlite::Result<HashMap<i32, String>> {
         .collect()
 }
 fn discover(db: &Connection, out: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
-    let mut stmt = db.prepare("SELECT c.ROWID,coalesce(c.display_name,''),c.chat_identifier,(SELECT count(*) FROM chat_message_join j WHERE j.chat_id=c.ROWID) FROM chat c WHERE (SELECT count(*) FROM chat_handle_join h WHERE h.chat_id=c.ROWID)>=2")?;
+    let mut stmt = db.prepare("SELECT c.ROWID,coalesce(c.display_name,''),c.chat_identifier,(SELECT count(*) FROM chat_message_join j WHERE j.chat_id=c.ROWID),(SELECT min(m.date) FROM chat_message_join j JOIN message m ON m.ROWID=j.message_id WHERE j.chat_id=c.ROWID),(SELECT max(m.date) FROM chat_message_join j JOIN message m ON m.ROWID=j.message_id WHERE j.chat_id=c.ROWID) FROM chat c WHERE (SELECT count(*) FROM chat_handle_join h WHERE h.chat_id=c.ROWID)>=2")?;
     let hs = handles(db)?;
     for row in stmt.query_map([], |r| {
         Ok((
@@ -57,9 +57,11 @@ fn discover(db: &Connection, out: &mut impl Write) -> Result<(), Box<dyn std::er
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
             r.get::<_, i64>(3)?,
+            r.get::<_, Option<i64>>(4)?,
+            r.get::<_, Option<i64>>(5)?,
         ))
     })? {
-        let (id, name, identifier, count) = row?;
+        let (id, name, identifier, count, start, end) = row?;
         let members: Vec<String> = db
             .prepare("SELECT handle_id FROM chat_handle_join WHERE chat_id=?")?
             .query_map([id], |r| r.get::<_, i32>(0))?
@@ -67,7 +69,7 @@ fn discover(db: &Connection, out: &mut impl Write) -> Result<(), Box<dyn std::er
             .collect();
         emit(
             out,
-            json!({"schema_version":1,"record":"chat","id":id,"name":name,"identifier":identifier,"members":members,"messages":count}),
+            json!({"schema_version":1,"record":"chat","id":id,"name":name,"identifier":identifier,"members":members,"messages":count,"start":start.map(timestamp),"end":end.map(timestamp)}),
         )?;
     }
     Ok(())

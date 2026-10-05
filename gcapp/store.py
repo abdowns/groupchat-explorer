@@ -239,6 +239,17 @@ def rich_payload_links(record):
         )
 
 
+def same_source_record(previous, current, encoded):
+    if previous == encoded:
+        return True
+    # A Messages GUID can belong to several selected threads. Membership is
+    # retained separately; a different join row is not a message/reaction edit.
+    prior = json.loads(previous)
+    return {k: v for k, v in prior.items() if k != "chat_id"} == {
+        k: v for k, v in current.items() if k != "chat_id"
+    }
+
+
 def import_records(db, records, attachment_root=None, progress=None, full_snapshot=False):
     """Reconcile by original GUID. Reactions are events, never authored messages."""
     changed = 0
@@ -263,7 +274,7 @@ def import_records(db, records, attachment_root=None, progress=None, full_snapsh
             observed.add(r["id"])
             prev = db.execute("SELECT raw FROM reaction_events WHERE id=?", (r["id"],)).fetchone()
             raw = json.dumps(r, sort_keys=True)
-            if not prev or prev[0] != raw:
+            if not prev or not same_source_record(prev[0], r, raw):
                 db.execute(
                     "INSERT OR REPLACE INTO reaction_events VALUES(?,?,?,?,?,?,?,?)",
                     (r["id"], pid, r.get("target"), r.get("part", 0), r["ts"], r["type"], r["action"], raw),
@@ -283,7 +294,7 @@ def import_records(db, records, attachment_root=None, progress=None, full_snapsh
             if len(failures) < 100:
                 failures.append(payload_error)
         old = db.execute("SELECT raw FROM messages WHERE id=?", (r["id"],)).fetchone()
-        if old and old[0] == raw:
+        if old and same_source_record(old[0], r, raw):
             for attachment in r.get("attachments", []):
                 path = attachment_path(attachment, attachment_root)
                 previous = db.execute(

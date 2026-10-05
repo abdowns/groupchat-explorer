@@ -3763,6 +3763,10 @@ function ImportModal({
                 placeholder="The name you know it by"
               />
             </label>
+            <p>
+              Did Messages split your group into a new thread? Select both
+              entries below to combine their history into one workspace.
+            </p>
             <div className="chat-selection">
               {discovery.chats.map((c: any) => (
                 <label key={c.id}>
@@ -3784,13 +3788,20 @@ function ImportModal({
                       {num(c.messages)} source records · {c.members.length}{" "}
                       participants
                     </small>
+                    <small>
+                      {c.start != null && c.end != null
+                        ? `${date(c.start, { month: "short", day: "numeric", year: "numeric" })} — ${date(c.end, { month: "short", day: "numeric", year: "numeric" })}`
+                        : "No dated history"}{" "}
+                      · Thread {c.id}
+                    </small>
                   </div>
                 </label>
               ))}
             </div>
-            <p className="footnote">
-              Select more than one thread only when they belong to the same
-              group.
+            <p className="footnote" role="status">
+              {selected.length > 1
+                ? `${selected.length} threads selected. Their messages, reactions, and media will share one timeline and analytics dashboard. Refresh will update every selected thread.`
+                : "Select one thread, or select multiple related threads to combine a split group. Shared messages are counted once."}
             </p>
             <button
               className="primary"
@@ -3813,7 +3824,9 @@ function ImportModal({
                 setBusy(false);
               }}
             >
-              Import selected history
+              {selected.length > 1
+                ? `Combine ${selected.length} threads & import`
+                : "Import selected history"}
               <ArrowRight size={15} />
             </button>
           </>

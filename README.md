@@ -27,7 +27,7 @@ To install the exact Python versions used during validation instead of resolving
 ## Import your group
 
 1. Choose **Import a chat**, then the local `~/Library/Messages/chat.db` or a supplied snapshot. For a copied database, optionally select the root of its `Attachments` directory.
-2. Discover the available groups and select the thread. Select multiple related threads only when you want to combine their history in this workspace. Participant equality never causes automatic merging.
+2. Discover the available groups and select the thread. If Messages split your group (for example, two entries with the same name), compare the displayed date ranges, check both entries, and choose **Combine threads & import**. Their histories share one workspace, timeline, and analytics dashboard; shared message GUIDs are counted once, and refresh updates all selected threads. Participant equality never causes automatic merging.
 3. Import. Progress and diagnostics appear under Settings. If Contacts access is already granted, saved names are applied automatically. Use **Settings & analysis → Use saved contact names** to grant Contacts access or update an existing archive. Rename members or explicitly merge their phone/email identities in People.
 4. Use **Refresh archive** to reconcile new messages and changed historical edits/reactions. Reimporting the same records is idempotent.
 
