@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>org.groupchatexplorer.contacts</string>
+<key>CFBundleName</key><string>Group Chat Explorer Contacts</string>
+<key>NSContactsUsageDescription</key><string>Show your saved contact names for members of your imported group chats.</string>
+</dict></plist>

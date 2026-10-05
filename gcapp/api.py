@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import analysis, analytics, cloud, ingestion, jobs, media
+from . import analysis, analytics, cloud, contacts, ingestion, jobs, media
 from .store import (
     ROOT,
     create_workspace,
@@ -417,6 +417,12 @@ def person(wid: str, pid: str, filters=Depends(filter_params)) -> dict[str, Any]
         return analytics.person_profile(db, filters, pid)
 
 
+@app.post("/api/v1/workspaces/{wid}/contacts/sync")
+def sync_contacts(wid: str):
+    with workspace(wid) as db:
+        return contacts.sync_names(db, request_access=True)
+
+
 @app.patch("/api/v1/workspaces/{wid}/people/{pid}")
 def edit_person(wid: str, pid: str, body: PersonInput):
     with workspace(wid) as db:
@@ -424,6 +430,9 @@ def edit_person(wid: str, pid: str, body: PersonInput):
             raise KeyError("Person not found")
         if body.name:
             db.execute("UPDATE people SET name=? WHERE id=?", (body.name, pid))
+            manual = meta(db, "manual_names", {})
+            manual[pid] = body.name
+            set_meta(db, "manual_names", manual)
         if body.merge_into:
             if (
                 pid == body.merge_into
@@ -781,6 +790,7 @@ def settings(wid: str):
         return {
             "timezone": meta(db, "timezone"),
             "session_gap": meta(db, "session_gap"),
+            "contacts": meta(db, "contacts", {"status": "not_requested"}),
             "cloud_enabled": meta(db, "cloud_enabled", False),
             "cloud_model": meta(db, "cloud_model", ""),
             "has_key": cloud.has_key(wid),

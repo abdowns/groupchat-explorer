@@ -49,3 +49,12 @@ def api_client(archive):
 
     client = TestClient(app, headers={"X-Session-Token": SESSION_TOKEN})
     return client, archive[0]
+
+
+@pytest.fixture(autouse=True)
+def synthetic_contacts_only(monkeypatch):
+    from gcapp import contacts
+
+    monkeypatch.setattr(
+        contacts, "read_contacts", lambda *args, **kwargs: {"status": "not_requested", "contacts": []}
+    )

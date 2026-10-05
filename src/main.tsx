@@ -3388,6 +3388,61 @@ function Settings() {
               </form>
             </Panel>
             <Panel
+              title="Saved contact names"
+              subtitle="Match members to Contacts on this Mac"
+            >
+              <p className="explain">
+                Use saved names across conversations, charts, and games. Manual
+                renames stay in place. Members without a unique match keep their
+                current name; identities are never merged automatically.
+              </p>
+              <p className="footnote">
+                macOS may ask for Contacts access. If access is denied, enable
+                it in System Settings → Privacy &amp; Security → Contacts for
+                the app or terminal running Group Chat Explorer.
+              </p>
+              {d.contacts.status === "available" && (
+                <p role="status">
+                  {num(d.contacts.matched)} members matched ·{" "}
+                  {num(d.contacts.ambiguous)} ambiguous matches
+                </p>
+              )}
+              {d.contacts.error && <p role="status">{d.contacts.error}</p>}
+              {d.contacts.status === "denied" && (
+                <p role="status">
+                  Contacts access was denied. Enable access, then retry.
+                </p>
+              )}
+              <button
+                className="primary"
+                disabled={busy === "contacts"}
+                onClick={async () => {
+                  setBusy("contacts");
+                  try {
+                    const result = await mutate(
+                      `/workspaces/${wid}/contacts/sync`,
+                      {},
+                    );
+                    await client.invalidateQueries();
+                    toast(
+                      result.status === "available"
+                        ? `Updated ${result.updated} member names from Contacts`
+                        : (result.error ??
+                            "Allow Contacts access in macOS settings, then retry"),
+                    );
+                  } catch (e: any) {
+                    toast(e.message);
+                  } finally {
+                    setBusy("");
+                  }
+                }}
+              >
+                {busy === "contacts"
+                  ? "Reading Contacts…"
+                  : "Use saved contact names"}
+              </button>
+            </Panel>
+            <Panel
               title="Optional cloud writing"
               subtitle="Your archive stays local. Only reviewed excerpts are sent."
             >

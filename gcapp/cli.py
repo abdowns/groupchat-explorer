@@ -20,6 +20,7 @@ def main():
                 {
                     "rust_parser": (PROJECT / "importer/target/release/gc-importer").is_file(),
                     "frontend": (PROJECT / "dist").is_dir(),
+                    "contacts_helper": (PROJECT / "native/contacts/target/gc-contacts").is_file(),
                     "ffmpeg": bool(shutil.which("ffmpeg")),
                     "analysis": bool(importlib.util.find_spec("sentence_transformers")),
                 },

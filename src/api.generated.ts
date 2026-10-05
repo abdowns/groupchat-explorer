@@ -226,6 +226,23 @@ export interface paths {
         patch: operations["edit_person_api_v1_workspaces__wid__people__pid__patch"];
         trace?: never;
     };
+    "/api/v1/workspaces/{wid}/contacts/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync Contacts */
+        post: operations["sync_contacts_api_v1_workspaces__wid__contacts_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{wid}/timeline": {
         parameters: {
             query?: never;
@@ -1358,6 +1375,37 @@ export interface operations {
                 "application/json": components["schemas"]["PersonInput"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_contacts_api_v1_workspaces__wid__contacts_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                wid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

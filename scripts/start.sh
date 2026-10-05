@@ -13,6 +13,7 @@ fi
 if [ ! -d node_modules ]; then npm ci; fi
 if ! command -v cargo >/dev/null 2>&1; then echo "Install Rust (brew install rust)."; exit 1; fi
 cargo build --release --locked --manifest-path importer/Cargo.toml
+./scripts/build-contacts.sh
 npm run build
 echo "Open http://127.0.0.1:8765 — your archive stays on this Mac."
 exec .venv/bin/python -m gcapp.cli serve

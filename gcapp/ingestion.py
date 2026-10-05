@@ -78,6 +78,7 @@ def discover(iid):
 
 def perform_import(wid, iid, chat_ids, attachment_root=None, progress=None):
     from .analysis import derive_local
+    from .contacts import sync_names
 
     info = import_info(iid)
     process = subprocess.Popen(
@@ -102,6 +103,7 @@ def perform_import(wid, iid, chat_ids, attachment_root=None, progress=None):
                 "source",
                 {"path": info["source"], "chat_ids": chat_ids, "attachment_root": attachment_root},
             )
+            sync_names(db)
             derive_local(db)
         return count
     finally:
