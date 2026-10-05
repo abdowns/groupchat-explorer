@@ -1780,12 +1780,14 @@ function Reactions() {
                     label="Breakdown by reaction type"
                     option={{
                       tooltip: { trigger: "item" },
-                      legend: { bottom: 0 },
+                      legend: { type: "scroll", bottom: 0, left: 0, right: 0 },
                       series: [
                         {
                           type: "pie",
+                          top: 0,
+                          bottom: 44,
                           radius: ["45%", "72%"],
-                          center: ["50%", "43%"],
+                          center: ["50%", "50%"],
                           label: { show: false },
                           color: COLORS,
                           data: Object.entries(types).map(([name, value]) => ({
@@ -1856,7 +1858,14 @@ function Reactions() {
                 <Chart
                   label="Monthly reaction types"
                   option={{
-                    legend: { bottom: 0 },
+                    legend: { type: "scroll", bottom: 0, left: 0, right: 0 },
+                    grid: {
+                      left: 42,
+                      right: 20,
+                      top: 20,
+                      bottom: 65,
+                      containLabel: true,
+                    },
                     xAxis: {
                       type: "category",
                       data: [
