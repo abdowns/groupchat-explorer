@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import random
-from collections import Counter, defaultdict
+from collections import Counter
 from functools import lru_cache
 
 import numpy as np
@@ -17,45 +16,18 @@ STOP = set(
 )
 
 
-def cosine_counts(a, b):
-    den = math.sqrt(sum(v * v for v in a.values()) * sum(v * v for v in b.values()))
-    return sum(v * b.get(k, 0) for k, v in a.items()) / den if den else 0
-
-
 def derive_local(db, progress=None):
     """Deterministic, evidence-linked suggestions. Manual annotations survive refresh."""
     db.execute("DELETE FROM eras WHERE manual=0")
     db.execute("DELETE FROM events WHERE manual=0")
     db.execute("DELETE FROM lore WHERE manual=0")
-    weeks = defaultdict(
-        lambda: {
-            "vocab": Counter(),
-            "topics": Counter(),
-            "people": Counter(),
-            "count": 0,
-            "start": None,
-            "end": 0,
-            "sources": [],
-        }
-    )
     candidates = Counter()
     for i, row in enumerate(
         db.execute("SELECT id,ts,text,person_id,topic_id FROM messages WHERE kind='message' ORDER BY ts,id")
     ):
         if progress and i % 2000 == 0:
             progress(0.1, f"Finding patterns in {i:,} messages")
-        w = weeks[int(row["ts"] // (7 * 86400))]
-        w["count"] += 1
-        w["people"][row["person_id"]] += 1
-        if row["topic_id"] is not None:
-            w["topics"][row["topic_id"]] += 1
-        w["start"] = row["ts"] if w["start"] is None else w["start"]
-        w["end"] = row["ts"]
-        if len(w["sources"]) < 5:
-            w["sources"].append(row["id"])
         tokens = words(row["text"])
-        if w["count"] <= 2000:
-            w["vocab"].update(t for t in tokens if t not in STOP and len(t) > 2)
         # Bounded candidate discovery, followed by exact counts for shortlisted phrases.
         for n in (2, 3, 4):
             candidates.update(
@@ -107,50 +79,9 @@ def derive_local(db, progress=None):
         )
         if len(chosen) >= 16:
             break
-    ordered = sorted(weeks.items())
-    segments = []
-    current = []
-    previous = None
-    for week, info in ordered:
-        changed = False
-        if previous and len(current) >= 4 and info["count"] >= 10:
-            prev_week, prev = previous
-            distance = 0.65 * (1 - cosine_counts(prev["vocab"], info["vocab"])) + 0.25 * (
-                1 - cosine_counts(prev["people"], info["people"])
-            )
-            distance += 0.1 * min(1, abs(math.log((info["count"] + 1) / (prev["count"] + 1))))
-            if prev["topics"] and info["topics"]:
-                distance = distance * 0.7 + 0.3 * (1 - cosine_counts(prev["topics"], info["topics"]))
-            changed = distance > 0.42 or week - prev_week > 5
-        if changed:
-            segments.append(current)
-            current = []
-        current.append(info)
-        previous = (week, info)
-    if current:
-        segments.append(current)
-    for segment in segments:
-        count = sum(s["count"] for s in segment)
-        if count < 30:
-            continue
-        vocab = sum((s["vocab"] for s in segment), Counter())
-        terms = [w for w, _ in vocab.most_common(4)]
-        start, end = segment[0]["start"], segment[-1]["end"]
-        name = " / ".join(terms[:2]).title() or "An active chapter"
-        sources = [sid for s in segment[:4] for sid in s["sources"]][:15]
-        db.execute(
-            "INSERT INTO eras VALUES(?,?,?,?,?,?,?,?)",
-            (
-                stable_id(f"era{start}"),
-                name,
-                start,
-                end,
-                f"{count:,} messages. Recurring language: {', '.join(terms)}. Suggested from shifts in activity, language, and participation.",
-                json.dumps(sources),
-                0,
-                "local-v1",
-            ),
-        )
+    from .topic_model import suggest_eras
+
+    suggest_eras(db)
     top_sessions = db.execute(
         "SELECT s.*,s.count+coalesce(sum(m.reaction_count),0)*2+sum(m.reply_to IS NOT NULL)*2 engagement FROM sessions s JOIN messages m ON m.session_id=s.id GROUP BY s.id ORDER BY engagement DESC LIMIT 16"
     ).fetchall()
@@ -214,10 +145,9 @@ def embedding_model(name="sentence-transformers/all-MiniLM-L6-v2"):
 
 
 def build_semantics(wid, progress):
-    import hdbscan
     import hnswlib
-    from sklearn.feature_extraction.text import CountVectorizer
-    from sklearn.preprocessing import normalize
+
+    from .topic_model import content, discover_topics, stopwords
 
     progress(0.01, "Loading the local embedding model (first run downloads model weights)")
     model = embedding_model()
@@ -227,9 +157,9 @@ def build_semantics(wid, progress):
         db.execute("DELETE FROM passages")
         db.execute("DELETE FROM topics")
         db.execute("UPDATE messages SET topic_id=NULL")
-        persons = {r["id"]: r["name"] for r in db.execute("SELECT * FROM people")}
+        stops = stopwords(db)
         total = db.execute("SELECT count(*) FROM messages WHERE kind='message'").fetchone()[0]
-        batch, passage_ids, labels = [], [], []
+        batch, passage_ids, labels, eligible = [], [], [], []
         capacity = max(1000, total * 2)
         index = hnswlib.Index(space="cosine", dim=384)
         index.init_index(max_elements=capacity, ef_construction=100, M=16)
@@ -239,6 +169,8 @@ def build_semantics(wid, progress):
         processed = 0
         counter = 0
         reservoir = random.Random(174)
+        sample_seen = 0
+        duplicates = Counter()
         cache = directory / "embedding-cache"
         cache.mkdir(exist_ok=True)
 
@@ -254,27 +186,36 @@ def build_semantics(wid, progress):
             return result
 
         def flush():
-            nonlocal counter
+            nonlocal counter, sample_seen
             if not batch:
                 return
             vectors = encoded(batch)
             if counter + len(batch) > index.get_max_elements():
                 index.resize_index(counter + len(batch) + 1000)
             index.add_items(vectors, labels)
-            # Bound clustering memory; all passages still go into the search index.
-            for offset, (pid, vector, text) in enumerate(zip(passage_ids, vectors, batch)):
-                if len(topic_samples) < 20000:
+            # Topic discovery sees only substantive, speaker-free conversation passages.
+            for pid, vector, text, candidate in zip(passage_ids, vectors, batch, eligible):
+                if not candidate:
+                    continue
+                fingerprint = hashlib.sha256(text.encode()).hexdigest()
+                if duplicates[fingerprint] >= 2:
+                    continue
+                if len(duplicates) < 100000:
+                    duplicates[fingerprint] += 1
+                sample_seen += 1
+                if len(topic_samples) < 12000:
                     topic_samples.append((pid, text))
                     passage_vectors.append(vector)
                 else:
-                    position = reservoir.randrange(counter + offset + 1)
-                    if position < 20000:
+                    position = reservoir.randrange(sample_seen)
+                    if position < 12000:
                         topic_samples[position] = (pid, text)
                         passage_vectors[position] = vector
             counter += len(batch)
             batch.clear()
             labels.clear()
             passage_ids.clear()
+            eligible.clear()
 
         def add(text, sources, start, end, individual=False):
             tokens = model.tokenizer.encode(text, add_special_tokens=False)
@@ -295,6 +236,7 @@ def build_semantics(wid, progress):
                 batch.append(chunk)
                 labels.append(row.lastrowid)
                 passage_ids.append(row.lastrowid)
+                eligible.append(not individual and len(set(words(chunk))) >= 5)
                 if len(batch) >= 96:
                     flush()
 
@@ -309,9 +251,13 @@ def build_semantics(wid, progress):
                 session = r["session_id"]
             if r["text"].strip():
                 add(r["text"], [r["id"]], r["ts"], r["ts"], individual=True)
-            buffer.append(persons[r["person_id"]] + ": " + r["text"])
-            ids.append(r["id"])
-            end = r["ts"]
+            tokens = content(r["text"], stops)
+            if len(set(tokens)) >= 2:
+                if not buffer:
+                    start = r["ts"]
+                buffer.append(" ".join(tokens))
+                ids.append(r["id"])
+                end = r["ts"]
             processed += 1
             if processed % 200 == 0:
                 progress(
@@ -322,75 +268,8 @@ def build_semantics(wid, progress):
         flush()
         if counter == 0:
             raise ValueError("No text is available to index")
-        progress(0.75, "Clustering conversation topics")
-        vectors = np.asarray(passage_vectors)
-        clustering = hdbscan.HDBSCAN(
-            min_cluster_size=max(5, min(30, len(vectors) // 30)), metric="euclidean", core_dist_n_jobs=4
-        )
-        topic_labels = clustering.fit_predict(vectors) if len(vectors) >= 10 else np.full(len(vectors), -1)
-        groups = defaultdict(list)
-        for sample, label in zip(topic_samples, topic_labels):
-            if label >= 0:
-                groups[int(label)].append(sample)
-        if groups:
-            vectorizer = CountVectorizer(stop_words="english", max_features=12000, ngram_range=(1, 2))
-            group_ids = sorted(groups)
-            texts = [" ".join(t for _, t in groups[k]) for k in group_ids]
-            counts = vectorizer.fit_transform(texts).astype(float)
-            tf = normalize(counts, norm="l1", axis=1)
-            idf = np.log(
-                1 + np.asarray(counts.sum(axis=1)).mean() / (1 + np.asarray(counts.sum(axis=0)).ravel())
-            )
-            ctfidf = tf.multiply(idf).toarray()
-            terms = vectorizer.get_feature_names_out()
-            centroids = []
-            for i, label in enumerate(group_ids):
-                top = [str(terms[j]) for j in ctfidf[i].argsort()[-5:][::-1]]
-                source_ids = []
-                for pid, _ in groups[label]:
-                    db.execute("UPDATE passages SET topic_id=? WHERE id=?", (label, pid))
-                    source_ids.extend(
-                        json.loads(
-                            db.execute("SELECT sources FROM passages WHERE id=?", (pid,)).fetchone()[0]
-                        )
-                    )
-                source_ids = list(dict.fromkeys(source_ids))
-                db.execute(
-                    "INSERT INTO topics VALUES(?,?,?,?,?,?)",
-                    (
-                        label,
-                        " · ".join(top[:2]),
-                        json.dumps(top),
-                        len(source_ids),
-                        json.dumps(source_ids[:30]),
-                        f"hdbscan-v1-r{revision}",
-                    ),
-                )
-                for sid in source_ids:
-                    db.execute("UPDATE messages SET topic_id=? WHERE id=?", (label, sid))
-                indices = np.flatnonzero(topic_labels == label)
-                centroids.append(vectors[indices].mean(axis=0))
-            # Assign remaining passages/messages by nearest learned topic centroid in batches.
-            centroids = normalize(np.asarray(centroids))
-            cursor = db.execute("SELECT id,text,sources FROM passages WHERE topic_id IS NULL")
-            while rows := cursor.fetchmany(128):
-                vs = encoded([r["text"] for r in rows])
-                sims = vs @ centroids.T
-                for r, sim in zip(rows, sims):
-                    best = int(sim.argmax())
-                    if sim[best] < 0.35:
-                        continue
-                    label = group_ids[best]
-                    db.execute("UPDATE passages SET topic_id=? WHERE id=?", (label, r["id"]))
-                    for sid in json.loads(r["sources"]):
-                        db.execute(
-                            "UPDATE messages SET topic_id=? WHERE id=? AND topic_id IS NULL", (label, sid)
-                        )
-            for label in group_ids:
-                db.execute(
-                    "UPDATE topics SET count=(SELECT count(*) FROM messages WHERE topic_id=?) WHERE id=?",
-                    (label, label),
-                )
+        progress(0.75, "Discovering substantive conversation themes")
+        discover_topics(db, topic_samples, passage_vectors, index, model, stops, progress)
         progress(0.94, "Saving the search index")
         temp = directory / "semantic.pending.hnsw"
         index.save_index(str(temp))

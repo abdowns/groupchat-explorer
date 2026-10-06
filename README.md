@@ -45,12 +45,22 @@ App-owned workspaces, snapshots, annotations, vector indexes, cached previews, a
 - **Reactions:** current received reactions, zero-inclusive per-message averages, reacted-message percentage, observed additions given, type breakdowns, giver/recipient matrix, and supporting messages. Minimum sample size defaults to 20.
 - **Words & phrases:** case-insensitive whole-word matching, exact phrases, substring mode, or English Porter variants. Compare occurrences, matching messages, and uses per 1,000 authored words; see first/last observed use and trends. Matching archives paginate beyond previews. Choose **Semantic meaning** to rank who talks about a concept using MiniLM similarity, by matching messages or matches per 1,000 authored messages. Adjust the cutoff and minimum sample size, inspect matching conversations, and compare monthly trends.
 - **Conversations:** session starters, co-participation network, explicit reply partners/trees, and chronological replay. Inferred sessions default to a 30-minute inactivity gap and remain distinct from explicit replies.
-- **Topics & search:** FTS5 keyword retrieval, MiniLM semantic retrieval, reciprocal-rank hybrid fusion, HDBSCAN topics with class-based TF-IDF labels, trends, and source-linked archive questions.
+- **Topics & search:** FTS5 keyword retrieval, MiniLM semantic retrieval, reciprocal-rank hybrid fusion, speaker-free conversation embeddings, UMAP/HDBSCAN themes with distinctive phrase labels, monthly counts/share, significant conversations, and source-linked archive questions.
 - **Lore:** recurring phrase candidates, adoption across members, observed origins, contextual sources, and optional generated narratives. Treat suggested lore as interpretations you can inspect.
 - **Media & links:** attachment gallery, missing-file placeholders, local Vision OCR, existing/Whisper transcripts, repeated-image hashes, CLIP image search, URLs and domains. Shared URLs are never automatically fetched.
 - **Recaps & games:** selected-period statistics, era comparison, computed and editable awards, downloadable PNG recap cards, statistics CSV, who-said-it, finish-the-quote, and guess-the-year. Games reveal the actual archived conversation after each answer.
 
 Date, member, and era filters are shared. Click charts/cards to open evidence with nearby context. Conversations use a virtualized, cursor-paginated list. Light/dark themes, reduced-motion styles, keyboard navigation, and tabular chart alternatives are available. Use ⌘K/Ctrl+K to open search.
+
+## Discovered topics and group arcs
+
+Rebuild **Settings & analysis → Build semantic index** after this update to replace earlier filler-word clusters. The new pipeline separates topic discovery from general search: it strips names/handles, English stopwords, chat filler, URLs, and ubiquitous short archive terms; samples substantive conversation passages; and clusters their MiniLM embeddings using UMAP and HDBSCAN. Labels combine document inverse frequency, sublinear term frequency, semantic relevance, and actual contiguous phrases. It does not contain a predefined list of subjects. Ambiguous, sparse, and filler-only messages remain unclassified instead of being forced into the nearest topic.
+
+**Topics & search** shows discovered themes across the full date range, as monthly message counts or share of all authored messages under the same filters. Select a theme for significant conversations ranked by topic-linked messages, participant variety, replies, and reactions, then open the original exchange. Charts show up to 20 leading themes; every discovered theme has its own conversation list.
+
+**Timeline** shows suggested and manual eras as date intervals in a zoomable arc timeline. Suggestions follow changes in weekly topic mix and distinctive vocabulary, including short busy periods, and retain supporting message IDs. Sparse weeks and long gaps do not receive invented chapters. Suggestions use descriptive theme labels rather than claiming to know real-world events absent from the messages; the existing optional cloud narrative workflow can provide reviewed, cited descriptions. Add/edit/split/merge/delete eras as before. Manual edits survive rebuilding, and dismissed automatic suggestions stay dismissed for the same observed boundary.
+
+The representation follows [BERTopic's embedding/clustering and weighting approach](https://maartengr.github.io/BERTopic/algorithm/algorithm.html), with extra filtering for chat data. Automatically inferred topics, assignments, and boundaries are interpretations to inspect, not guaranteed classifications. Full-archive clustering and embedding can take longer than browsing; progress, cancellation, and retry remain available in Settings.
 
 ## Semantic topic rankings
 

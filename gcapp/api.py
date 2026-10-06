@@ -560,7 +560,20 @@ def timeline(wid: str, filters=Depends(filter_params)) -> dict[str, Any]:
                         "sources": [row["id"]],
                     }
                 )
-        return {"eras": eras, "events": events, "activity": activity, "milestones": milestones}
+        from .topic_model import VERSION
+
+        semantic_eras_ready = meta(db, "topic_model_version") == VERSION and meta(
+            db, "semantic_revision", -1
+        ) == meta(db, "revision", 0)
+        if not semantic_eras_ready:
+            eras = [era for era in eras if era["manual"]]
+        return {
+            "eras": eras,
+            "events": events,
+            "activity": activity,
+            "milestones": milestones,
+            "semantic_eras_ready": semantic_eras_ready,
+        }
 
 
 def validate_sources(db, ids):
@@ -587,6 +600,12 @@ def save_era(wid: str, body: EraInput, eid: str | None = None):
 @app.delete("/api/v1/workspaces/{wid}/eras/{eid}")
 def delete_era(wid: str, eid: str):
     with workspace(wid) as db:
+        era = db.execute("SELECT manual FROM eras WHERE id=?", (eid,)).fetchone()
+        if era:
+            dismissed = meta(db, "dismissed_eras", [])
+            if eid not in dismissed:
+                dismissed.append(eid)
+            set_meta(db, "dismissed_eras", dismissed)
         db.execute("DELETE FROM eras WHERE id=?", (eid,))
     return {"ok": True}
 
@@ -645,8 +664,22 @@ def lore_journey(wid: str, lid: str, filters=Depends(filter_params)):
 
 @app.get("/api/v1/workspaces/{wid}/topics")
 def topics(wid: str, filters=Depends(filter_params)) -> dict[str, Any]:
+    from .topic_model import VERSION
+
     with workspace(wid) as db:
+        ready = meta(db, "topic_model_version") == VERSION and meta(db, "semantic_revision", -1) == meta(
+            db, "revision", 0
+        )
         where, args = scope(db, **filters)
+        totals = [
+            dict(r)
+            for r in db.execute(
+                f"SELECT substr(day,1,7) month,count(*) total FROM messages m WHERE {where} GROUP BY month ORDER BY month",
+                args,
+            )
+        ]
+        if not ready:
+            return {"topics": [], "trend": [], "totals": totals, "ready": False, "quality": {}}
         rows = [
             decode_sources(r)
             for r in db.execute(
@@ -661,11 +694,42 @@ def topics(wid: str, filters=Depends(filter_params)) -> dict[str, Any]:
                 args,
             )
         ]
+        total_lookup = {r["month"]: r["total"] for r in totals}
+        for item in trend:
+            item["share"] = item["count"] / total_lookup[item["month"]]
         return {
             "topics": rows,
             "trend": trend,
-            "ready": meta(db, "semantic_revision", -1) == meta(db, "revision", 0),
+            "totals": totals,
+            "ready": True,
+            "quality": meta(db, "topic_quality", {}),
         }
+
+
+@app.get("/api/v1/workspaces/{wid}/topics/{tid}/conversations")
+def topic_conversations(wid: str, tid: int, filters=Depends(filter_params)) -> dict[str, Any]:
+    with workspace(wid) as db:
+        topic = db.execute("SELECT * FROM topics WHERE id=?", (tid,)).fetchone()
+        if not topic:
+            raise KeyError("Topic not found")
+        where, args = scope(db, **{**filters, "topic": tid})
+        rows = [
+            dict(r)
+            for r in db.execute(
+                f"SELECT s.id,s.start,s.end,s.count AS conversation_messages,count(*) AS topic_messages,count(DISTINCT m.person_id) AS participants,"
+                f"count(*)+sum(m.reaction_count)*2+sum(m.reply_to IS NOT NULL)+count(DISTINCT m.person_id)*2 AS significance "
+                f"FROM messages m JOIN sessions s ON s.id=m.session_id WHERE {where} GROUP BY s.id ORDER BY significance DESC,s.start DESC LIMIT 20",
+                args,
+            )
+        ]
+        for row in rows:
+            sample = db.execute(
+                f"SELECT m.id,m.text FROM messages m WHERE {where} AND m.session_id=? ORDER BY m.reaction_count DESC,m.words DESC LIMIT 1",
+                args + [row["id"]],
+            ).fetchone()
+            row["preview"] = sample["text"] if sample else ""
+            row["sources"] = [sample["id"]] if sample else []
+        return {"topic": decode_sources(topic), "conversations": rows}
 
 
 @app.get("/api/v1/workspaces/{wid}/search")
@@ -848,6 +912,7 @@ def settings(wid: str):
                     "embeddings": "sentence_transformers",
                     "vectors": "hnswlib",
                     "clustering": "hdbscan",
+                    "topic_reduction": "umap",
                     "audio": "whisper",
                 }.items()
             },

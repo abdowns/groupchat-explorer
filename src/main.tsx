@@ -58,6 +58,7 @@ import {
   PieChart,
   HeatmapChart,
   GraphChart,
+  CustomChart,
 } from "echarts/charts";
 import {
   GridComponent,
@@ -74,6 +75,7 @@ echarts.use([
   PieChart,
   HeatmapChart,
   GraphChart,
+  CustomChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
@@ -307,6 +309,12 @@ function Chart({
     return (s.data ?? []).map((point: any, index: number) => {
       const value = point?.value ?? point;
       if (Array.isArray(value)) {
+        if (s.type === "custom")
+          return [
+            point.name ?? "Era",
+            date(value[1] / 1000),
+            date(value[2] / 1000),
+          ];
         if (value.length === 3)
           return [
             option.xAxis?.data?.[value[0]] ?? value[0],
@@ -1184,6 +1192,14 @@ function Timeline() {
                 }
               />
             </Panel>
+            {d.eras.length > 0 && <EraTimeline eras={d.eras} open={open} />}
+            {!d.semantic_eras_ready && (
+              <p className="explain">
+                Build or rebuild the semantic index in Settings &amp; analysis
+                for topic-based era suggestions. You can add your own eras at
+                any time.
+              </p>
+            )}
             <div className="section-label">
               <Layers3 size={16} />
               <h3>The chapters</h3>
@@ -2563,8 +2579,176 @@ function Conversations() {
   );
 }
 
+function EraTimeline({
+  eras,
+  open,
+}: {
+  eras: Era[];
+  open: (s: DrawerSpec) => void;
+}) {
+  return (
+    <Panel
+      title="The arcs of the group"
+      subtitle="Drag to zoom; click an arc to revisit its conversations. Manual and suggested eras share this timeline."
+    >
+      <Chart
+        label="Group chat era timeline"
+        height={Math.max(220, Math.min(640, eras.length * 38 + 110))}
+        option={{
+          tooltip: {
+            trigger: "item",
+            renderMode: "richText",
+            formatter: (p: any) =>
+              `${p.name}\n${date(p.data.era.start)} — ${date(p.data.era.end)}`,
+          },
+          grid: { left: 180, right: 20, top: 20, bottom: 65 },
+          xAxis: { type: "time" },
+          yAxis: {
+            type: "category",
+            data: eras.map((e) => e.name),
+            inverse: true,
+            axisLabel: { width: 160, overflow: "truncate" },
+          },
+          dataZoom: [
+            { type: "inside", xAxisIndex: 0 },
+            { type: "slider", xAxisIndex: 0, height: 18, bottom: 0 },
+          ],
+          series: [
+            {
+              type: "custom",
+              encode: { x: [1, 2], y: 0 },
+              renderItem: (_: any, api: any) => {
+                const start = api.coord([api.value(1), api.value(0)]);
+                const end = api.coord([api.value(2), api.value(0)]);
+                const height = api.size([0, 1])[1] * 0.65;
+                const rect = echarts.graphic.clipRectByRect(
+                  {
+                    x: start[0],
+                    y: start[1] - height / 2,
+                    width: Math.max(3, end[0] - start[0]),
+                    height,
+                  },
+                  _.coordSys,
+                );
+                return (
+                  rect && {
+                    type: "rect",
+                    shape: { ...rect, r: 4 },
+                    style: {
+                      fill: COLORS[api.value(0) % COLORS.length],
+                      opacity: 0.85,
+                    },
+                  }
+                );
+              },
+              data: eras.map((era, i) => ({
+                name: era.name,
+                value: [i, era.start * 1000, era.end * 1000],
+                era,
+              })),
+            },
+          ],
+        }}
+        onClick={(p) =>
+          open({
+            title: p.data.era.name,
+            extra: { start: p.data.era.start, end: p.data.era.end },
+          })
+        }
+      />
+    </Panel>
+  );
+}
+
+function TopicTimeline({
+  data,
+  open,
+}: {
+  data: any;
+  open: (s: DrawerSpec) => void;
+}) {
+  const [metric, setMetric] = useState("share");
+  const months = (data.totals ?? []).map((r: any) => r.month);
+  return (
+    <Panel
+      title="Topics through time"
+      subtitle="Click a point to see the messages. Share uses all authored messages in each month under your current filters."
+      action={
+        <select
+          aria-label="Topic prevalence metric"
+          value={metric}
+          onChange={(e) => setMetric(e.target.value)}
+        >
+          <option value="share">Share of messages (%)</option>
+          <option value="count">Topic message count</option>
+        </select>
+      }
+    >
+      <Chart
+        label="Topic prevalence over time"
+        height={350}
+        option={{
+          color: COLORS,
+          tooltip: {
+            trigger: "item",
+            renderMode: "richText",
+            formatter: (p: any) =>
+              `${p.seriesName}\n${p.name}: ${p.data.count} messages${metric === "share" ? ` (${p.value.toFixed(1)}%)` : ""}`,
+          },
+          xAxis: { type: "category", data: months },
+          yAxis: {
+            type: "value",
+            name: metric === "share" ? "% of messages" : "Messages",
+          },
+          legend: { bottom: 0, type: "scroll", left: 0, right: 0 },
+          grid: { left: 55, right: 25, top: 30, bottom: 65 },
+          dataZoom: [{ type: "inside", xAxisIndex: 0 }],
+          series: data.topics.slice(0, 20).map((t: any) => ({
+            name: t.label,
+            type: "line",
+            symbolSize: 6,
+            data: months.map((month: string) => {
+              const point = data.trend.find(
+                (r: any) => r.month === month && r.topic_id === t.id,
+              );
+              return {
+                value:
+                  metric === "share"
+                    ? (point?.share ?? 0) * 100
+                    : (point?.count ?? 0),
+                count: point?.count ?? 0,
+                topic_id: t.id,
+              };
+            }),
+          })),
+        }}
+        onClick={(p) =>
+          open({
+            title: `${p.seriesName} · ${p.name}`,
+            extra: {
+              topic: p.data.topic_id,
+              start: dayStart(p.name + "-01"),
+              end: monthEnd(p.name),
+            },
+          })
+        }
+      />
+      <p className="footnote">
+        Up to 20 leading themes. Low-evidence messages stay unclassified;
+        keyword labels describe discovered themes, not guaranteed categories.
+      </p>
+    </Panel>
+  );
+}
+
 function Topics() {
   const q = useData("topics");
+  const [selectedTopic, setSelectedTopic] = useState<number | null>(null);
+  const conversations = useData(
+    `topics/${selectedTopic}/conversations`,
+    {},
+    selectedTopic !== null,
+  );
   const [draft, setDraft] = useState("");
   const [term, setTerm] = useState("");
   const [mode, setMode] = useState("hybrid");
@@ -2660,6 +2844,12 @@ function Topics() {
               </Panel>
             ) : (
               <>
+                <TopicTimeline data={d} open={open} />
+                <p className="explain">
+                  Themes are discovered from substantive conversation content.
+                  Speaker names, common words, and chat filler are excluded;
+                  distinctive language is weighted more heavily.
+                </p>
                 <div className="section-label">
                   <h3>What you keep coming back to</h3>
                 </div>
@@ -2684,16 +2874,67 @@ function Topics() {
                       </div>
                       <button
                         className="text-button"
-                        onClick={() =>
-                          open({ title: t.label, extra: { topic: t.id } })
-                        }
+                        onClick={() => setSelectedTopic(t.id)}
                       >
-                        Follow this topic
+                        Explore topic & conversations
                         <ArrowRight size={14} />
                       </button>
                     </article>
                   ))}
                 </div>
+                {selectedTopic !== null && (
+                  <State query={conversations}>
+                    {(detail) => (
+                      <Panel
+                        title={`Significant conversations: ${detail.topic.label}`}
+                        subtitle="Ranked by topic-linked messages, participant variety, replies, and reactions."
+                        action={
+                          <button
+                            className="subtle"
+                            onClick={() =>
+                              open({
+                                title: detail.topic.label,
+                                extra: { topic: selectedTopic },
+                              })
+                            }
+                          >
+                            Browse every topic message
+                          </button>
+                        }
+                      >
+                        <div className="session-list">
+                          {detail.conversations.map((c: any) => (
+                            <button
+                              className="session-row"
+                              key={c.id}
+                              onClick={() =>
+                                open({
+                                  title: `${detail.topic.label} · ${date(c.start)}`,
+                                  extra: { session: c.id },
+                                })
+                              }
+                            >
+                              <div>
+                                <strong>{date(c.start)}</strong>
+                                <p>{c.preview.slice(0, 180)}</p>
+                                <small>
+                                  {num(c.topic_messages)} topic messages ·{" "}
+                                  {c.participants} participants ·{" "}
+                                  {num(c.conversation_messages)} messages in the
+                                  full exchange
+                                </small>
+                              </div>
+                              <ArrowRight size={16} />
+                            </button>
+                          ))}
+                        </div>
+                        {!detail.conversations.length && (
+                          <Empty title="No conversations under these filters" />
+                        )}
+                      </Panel>
+                    )}
+                  </State>
+                )}
                 {d.topics.length === 0 && (
                   <Empty title="No stable topic clusters found">
                     <p>
@@ -2702,38 +2943,6 @@ function Topics() {
                     </p>
                   </Empty>
                 )}
-                <Panel title="Interests come and go">
-                  <Chart
-                    label="Topics over time"
-                    option={{
-                      color: COLORS,
-                      xAxis: {
-                        type: "category",
-                        data: [
-                          ...new Set(d.trend.map((r: any) => r.month)),
-                        ].sort(),
-                      },
-                      yAxis: { type: "value" },
-                      legend: { bottom: 0, type: "scroll" },
-                      grid: { bottom: 65 },
-                      series: d.topics.slice(0, 8).map((t: any) => ({
-                        name: t.label,
-                        type: "line",
-                        smooth: true,
-                        symbol: "none",
-                        data: [...new Set(d.trend.map((r: any) => r.month))]
-                          .sort()
-                          .map(
-                            (month) =>
-                              d.trend.find(
-                                (r: any) =>
-                                  r.month === month && r.topic_id === t.id,
-                              )?.count ?? 0,
-                          ),
-                      })),
-                    }}
-                  />
-                </Panel>
               </>
             )}
           </>

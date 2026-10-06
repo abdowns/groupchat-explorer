@@ -11,7 +11,7 @@ license = "GPL-3.0-only"
 dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.32,<1", "pydantic>=2.10,<3", "numpy>=2,<3", "httpx>=0.28,<1", "keyring>=25,<26", "pillow>=11,<13", "imagehash>=4.3,<5", "nltk>=3.9,<4"]
 
 [project.optional-dependencies]
-analysis = ["sentence-transformers>=3,<6", "hnswlib>=0.8,<1", "scikit-learn>=1.5,<2", "hdbscan>=0.8,<1", "openai-whisper>=20240930"]
+analysis = ["sentence-transformers>=3,<6", "hnswlib>=0.8,<1", "scikit-learn>=1.5,<2", "hdbscan>=0.8,<1", "umap-learn>=0.5.7,<0.6", "openai-whisper>=20240930"]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
 
 [project.scripts]

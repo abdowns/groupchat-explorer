@@ -414,6 +414,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{wid}/topics/{tid}/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Topic Conversations */
+        get: operations["topic_conversations_api_v1_workspaces__wid__topics__tid__conversations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{wid}/search": {
         parameters: {
             query?: never;
@@ -1880,6 +1897,47 @@ export interface operations {
             header?: never;
             path: {
                 wid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    topic_conversations_api_v1_workspaces__wid__topics__tid__conversations_get: {
+        parameters: {
+            query?: {
+                start?: number | null;
+                end?: number | null;
+                person?: string | null;
+                era?: string | null;
+                topic?: number | null;
+                session?: string | null;
+            };
+            header?: never;
+            path: {
+                wid: string;
+                tid: number;
             };
             cookie?: never;
         };

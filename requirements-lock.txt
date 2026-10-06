@@ -44,6 +44,7 @@ pluggy==1.6.0
 pydantic==2.13.5
 pydantic_core==2.46.5
 Pygments==2.21.0
+pynndescent==0.6.0
 pytest==9.1.1
 PyWavelets==1.10.0
 PyYAML==6.0.3
@@ -68,5 +69,6 @@ transformers==5.18.0
 typer==0.27.2
 typing-inspection==0.4.4
 typing_extensions==4.16.0
+umap-learn==0.5.12
 urllib3==2.8.0
 uvicorn==0.54.0
